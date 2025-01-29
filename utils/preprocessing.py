@@ -5,7 +5,91 @@ from sklearn.preprocessing import StandardScaler
 import pandas as pd
 from datetime import datetime
 from itertools import combinations
+import os
+import rasterio
+import matplotlib.pyplot as plt
 
+def process_composite_image(output_dir, selection_method='auto'):
+    """
+    Processes a Sentinel-2 composite image by allowing manual or automatic band selection.
+    
+    Args:
+    - output_dir (str): Path to the directory containing the composite image and metadata.
+    - selection_method (str): 'auto' to keep all bands from the first stack, 'manual' for user selection.
+    
+    Saves:
+    - A filtered 8-bit composite image with selected bands.
+    - Updated metadata CSV indicating kept/removed bands.
+    """
+
+    # Define file paths
+    composite_path = os.path.join(output_dir, "S2_Composite.tif")
+    output_path = os.path.join(output_dir, "S2_Composite_Filtered_8bit.tif")
+    metadata_path = os.path.join(output_dir, "S2_Metadata.csv")
+    updated_metadata_path = os.path.join(output_dir, "Updated_Metadata.csv")
+
+    # Load metadata
+    metadata_df = pd.read_csv(metadata_path)
+
+    # User selection: Auto or Manual
+    if selection_method == 'auto':
+        band_indices_to_keep = list(range(1, metadata_df.shape[0] + 1))
+        kept_or_removed = ['kept'] * len(band_indices_to_keep)
+    else:
+        # Open composite image
+        with rasterio.open(composite_path) as src:
+            num_bands = src.count
+            print(f"Number of bands in the composite: {num_bands}")
+
+            band_indices_to_keep = []
+            kept_or_removed = []
+
+            # Loop through each band for user selection
+            for band_index in range(1, num_bands + 1):  # Bands are 1-indexed in rasterio
+                band_data = src.read(band_index)
+
+                # Display the band
+                plt.figure()
+                plt.imshow(band_data, cmap='gray')
+                plt.title(f'Band {band_index}')
+                plt.colorbar()
+                plt.show()
+
+                # Ask user to keep the band
+                keep_band = input(f"Keep Band {band_index}? (y/n): ").strip().lower()
+                if keep_band == 'y':
+                    band_indices_to_keep.append(band_index)
+                    kept_or_removed.append('kept')
+                else:
+                    kept_or_removed.append('removed')
+
+    print(f"Bands to keep: {band_indices_to_keep}")
+
+    # Update metadata
+    metadata_df['Status'] = kept_or_removed
+    metadata_df.to_csv(updated_metadata_path, index=False)
+    print(f"Updated metadata saved to {updated_metadata_path}.")
+
+    # Save selected bands to new composite image
+    if band_indices_to_keep:
+        with rasterio.open(composite_path) as src:
+            meta = src.meta.copy()
+            meta.update(count=len(band_indices_to_keep), dtype=rasterio.uint8)
+
+            with rasterio.open(output_path, 'w', **meta) as dst:
+                for i, band_index in enumerate(band_indices_to_keep, start=1):
+                    band_data = src.read(band_index)
+
+                    # Normalize to 8-bit (0-255)
+                    band_data = np.nan_to_num(band_data)
+                    band_min, band_max = band_data.min(), band_data.max()
+                    band_data_8bit = ((band_data - band_min) / (band_max - band_min) * 255).astype(np.uint8)
+
+                    dst.write(band_data_8bit, i)
+
+        print(f"Filtered composite image saved to {output_path}.")
+    else:
+        print("No bands selected. Output file not created.")
 
 def preprocess_image_stack(image_stack, preprocess_params):
     """
@@ -78,7 +162,6 @@ def preprocess_image_stack(image_stack, preprocess_params):
         preprocessed_stack.append(img_gray)
         
     return np.stack(preprocessed_stack, axis=2)
-
 
 def define_date_pairs(metadata_path, min_separation=1, max_separation=5):
     """
