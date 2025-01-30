@@ -222,8 +222,8 @@ def prepare_csv_with_components(updated_dfs, geotiff_path):
         lon, lat = image_to_georef(*point)
         pid = generate_pid()
 
-        # Format dates in the required format YYYYMMDD
-        df['formatted_date'] = df['date'].dt.strftime('%Y%m%d')
+        # Format dates in the required format D YYYYMMDD
+        df['formatted_date'] = 'D' + df['date'].dt.strftime('%Y%m%d')
         
         # Flatten the time series into dictionaries for EW and SN components
         time_series_ew = df.set_index('formatted_date')['u_velocity'].to_dict()
@@ -283,26 +283,31 @@ def plot_fastest_points_components(csv_data_ew, csv_data_sn, top_n=5):
     - csv_data_sn: Pandas DataFrame containing SN-component time series data and median velocity.
     - top_n: Number of fastest points to plot for each component.
     """
-    # Sort the data by median_velocity_ew in descending order (assuming top points are the same for EW and SN components)
+    # Sort the data by median_velocity in descending order to find the fastest points
     fastest_points_ew = csv_data_ew.sort_values(by='median_velocity', ascending=False).head(top_n)
 
     for _, row_ew in fastest_points_ew.iterrows():
         point = row_ew['pid']
         median_velocity_ew = row_ew['median_velocity']
 
-        # Find corresponding row in SN-component DataFrame
-        row_sn = csv_data_sn[csv_data_sn['pid'] == point].iloc[0]
+        # Find the corresponding row in SN-component DataFrame
+        row_sn = csv_data_sn[csv_data_sn['pid'] == point]
+        if row_sn.empty:
+            print(f"Skipping point {point}: No corresponding SN data found.")
+            continue
+        row_sn = row_sn.iloc[0]  # Extract first matching row
+
         median_velocity_sn = row_sn['median_velocity']
 
-        # Extract the time series data (only date columns with valid time series values)
-        time_series_ew = row_ew.filter(regex='^\\d{8}$').dropna()
-        time_series_sn = row_sn.filter(regex='^\\d{8}$').dropna()
+        # Extract time series data (column names follow "DYYYYMMDD" format)
+        time_series_ew = row_ew.filter(regex=r'^D\d{8}$')
+        time_series_sn = row_sn.filter(regex=r'^D\d{8}$')
 
-        # Convert date columns to datetime
-        dates_ew = pd.to_datetime(time_series_ew.index, format='%Y%m%d')
+        # Convert date columns to datetime (removing leading 'D')
+        dates_ew = pd.to_datetime(time_series_ew.index.str[1:], format='%Y%m%d')
         values_ew = time_series_ew.values
 
-        dates_sn = pd.to_datetime(time_series_sn.index, format='%Y%m%d')
+        dates_sn = pd.to_datetime(time_series_sn.index.str[1:], format='%Y%m%d')
         values_sn = time_series_sn.values
 
         # Plot the time series for EW and SN components
