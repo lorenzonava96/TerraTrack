@@ -82,7 +82,6 @@ def handle_predictions(
             "all_max_corrs": np.array(all_max_corrs, dtype=object),
             "all_snrs": np.array(all_snrs, dtype=object),
             "separation": separation,
-            "study_area_image": orig[..., 0],
             "dat1": dat1,
             "dat2": dat2
         }
