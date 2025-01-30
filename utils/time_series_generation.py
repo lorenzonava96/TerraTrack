@@ -223,7 +223,7 @@ def prepare_csv_with_components(updated_dfs, geotiff_path):
         pid = generate_pid()
 
         # Format dates in the required format YYYYMMDD
-        df['formatted_date'] = df['date'].dt.strftime('%Y%m%d')
+        df['formatted_date'] = df['date'].dt.strftime('D%Y%m%d')
         
         # Flatten the time series into dictionaries for EW and SN components
         time_series_ew = df.set_index('formatted_date')['u_velocity'].to_dict()
