@@ -41,19 +41,25 @@ def load_dem_and_morpho(roi):
     aspect = ee.Terrain.aspect(dem)
     return dem.addBands(slope.rename('slope')).addBands(aspect.rename('aspect'))
 
-def process_sentinel2_data(roi, start_year, end_year, SUMMER_START, SUMMER_END, cloud_cover_max=10, n_per_year=4, mask_water=False, check_clouds=True, cloud_threshold=5):
+def process_sentinel2_data(roi, start_year, end_year, SUMMER_START, SUMMER_END, 
+                           cloud_cover_max=10, n_per_year=4, mask_water=False, 
+                           check_clouds=True, cloud_threshold=5, final_date=None):
     """
     Processes Sentinel-2 data with optional water masking and removes images with too many clouds in the ROI.
+    Also removes images after a specified final date.
 
     Parameters:
     - roi: Region of interest (Earth Engine Geometry)
     - start_year: Start year for data collection
     - end_year: End year for data collection
+    - SUMMER_START: Start of the summer season (month-day format, e.g., '06-01')
+    - SUMMER_END: End of the summer season (month-day format, e.g., '08-31')
     - cloud_cover_max: Maximum cloud cover percentage per tile (default: 10)
     - n_per_year: Number of evenly spaced images per year (default: 4)
     - mask_water: Apply water masking (default: False)
     - check_clouds: Remove images with too many clouds in ROI (default: True)
     - cloud_threshold: Maximum allowed cloud percentage inside ROI (default: 5%)
+    - final_date: Last date to include images (format: 'YYYY-MM-DD', default: None)
 
     Returns:
     - final_collection: Sentinel-2 image collection (filtered for clouds)
@@ -87,7 +93,12 @@ def process_sentinel2_data(roi, start_year, end_year, SUMMER_START, SUMMER_END, 
 
         print(f"Number of images after ROI-based cloud filtering: {filtered_collection.size().getInfo()}")
 
-    # Select evenly spaced images per year
+    # Remove images after the specified final_date
+    if final_date:
+        filtered_collection = filtered_collection.filter(ee.Filter.date('1970-01-01', final_date))
+        print(f"Number of images after applying final_date filter ({final_date}): {filtered_collection.size().getInfo()}")
+
+    # Select evenly spaced images per year (and within summer period)
     final_collection = get_evenly_spaced_images_per_year(filtered_collection, start_year, end_year, n_per_year, SUMMER_START, SUMMER_END)
 
     # Conditionally apply NDWI and water masking
