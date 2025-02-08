@@ -1,4 +1,7 @@
+uninstall earthengine-api -y
+uninstall geemap -y
 rasterio
 geemap
 geedim
---upgrade earthengine-api geemap
+--upgrade earthengine-api 
+--upgrade geemap
