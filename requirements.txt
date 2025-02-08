@@ -1,5 +1,5 @@
 rasterio
 geemap
 geedim
-earthengine-api --upgrade
-geemap --upgrade
+earthengine-api
+geemap
