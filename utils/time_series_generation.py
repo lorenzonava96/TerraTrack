@@ -187,91 +187,105 @@ def compute_rmse_polynomial(velocities, timestamps, degree=3):
 
 def prepare_csv_with_components(updated_dfs, geotiff_path):
     """
-    Prepare two CSVs in EGMS-like format using velocity time series for each component (EW and SN).
+    Prepare two CSVs in EGMS-like format using velocity time series for each component (WE and NS).
     Include a 'pid', 'latitude', 'longitude', 'x', and 'y' columns (EPSG:4326),
     along with median velocities, RMSE, and time series data formatted as 'YYYYMMDD'.
 
     Parameters:
-    - updated_dfs: Dictionary of DataFrames containing time series data for each point, including EW and SN components.
+    - updated_dfs: Dictionary of DataFrames containing time series data for each point, 
+                   including WE (u_velocity) and NS (v_velocity) components.
     - geotiff_path: Path to the GeoTIFF file used for georeferencing image coordinates.
 
     Returns:
-    - formatted_csv_ew: A Pandas DataFrame for the EW component, ready for CSV export.
-    - formatted_csv_sn: A Pandas DataFrame for the SN component, ready for CSV export.
+    - formatted_csv_we: A Pandas DataFrame for the WE component, ready for CSV export.
+    - formatted_csv_ns: A Pandas DataFrame for the NS component, ready for CSV export.
     """
-    # Open the GeoTIFF file to get geotransform
+    import random, string
+    import rasterio
+    from pyproj import Transformer
+    import pandas as pd
+
+    # Open the GeoTIFF file to get its transform and CRS
     with rasterio.open(geotiff_path) as src:
         transform = src.transform
+        src_crs = src.crs
+        # Create a transformer to convert from the GeoTIFF CRS to EPSG:4326
+        transformer = Transformer.from_crs(src_crs, "EPSG:4326", always_xy=True)
 
     def image_to_georef(x, y):
-        """Convert image coordinates (col, row) to georeferenced coordinates."""
-        lon, lat = rasterio.transform.xy(transform, y, x, offset='center')
+        """
+        Convert image coordinates (col, row) to georeferenced coordinates in EPSG:4326.
+        """
+        x_coord, y_coord = rasterio.transform.xy(transform, y, x, offset='center')
+        lon, lat = transformer.transform(x_coord, y_coord)
         return round(lon, 6), round(lat, 6)  # Round to 6 decimals for precision
 
     def generate_pid():
         """Generate a random alphanumeric PID."""
         return 'OT' + ''.join(random.choices(string.ascii_letters + string.digits, k=8))
 
-    # Initialize the lists for storing all points' data for EW and SN components
-    csv_data_ew = []
-    csv_data_sn = []
+    # Initialize lists for storing data for WE and NS components
+    csv_data_we = []
+    csv_data_ns = []
 
     # Loop through each point and its corresponding DataFrame
     for point, df in updated_dfs.items():
-        # Convert point to georeferenced coordinates
+        # Convert image point to georeferenced coordinates in EPSG:4326
         lon, lat = image_to_georef(*point)
         pid = generate_pid()
 
-        # Format dates in the required format D YYYYMMDD
+        # Format dates in the required format 'DYYYYMMDD'
         df['formatted_date'] = 'D' + df['date'].dt.strftime('%Y%m%d')
         
-        # Flatten the time series into dictionaries for EW and SN components
-        time_series_ew = df.set_index('formatted_date')['u_velocity'].to_dict()
-        time_series_sn = df.set_index('formatted_date')['v_velocity'].to_dict()
+        # Flatten the time series into dictionaries for WE and NS components.
+        # Here, u_velocity corresponds to WE and v_velocity to NS.
+        time_series_we = df.set_index('formatted_date')['u_velocity'].to_dict()
+        time_series_ns = df.set_index('formatted_date')['v_velocity'].to_dict()
         
-        # Limit decimal precision to 1 after the comma for EW and SN values
-        time_series_ew = {k: (round(v, 1) if isinstance(v, (int, float)) else v) for k, v in time_series_ew.items()}
-        time_series_sn = {k: (round(v, 1) if isinstance(v, (int, float)) else v) for k, v in time_series_sn.items()}
+        # Limit decimal precision to 1 for WE and NS values
+        time_series_we = {k: (round(v, 1) if isinstance(v, (int, float)) else v) for k, v in time_series_we.items()}
+        time_series_ns = {k: (round(v, 1) if isinstance(v, (int, float)) else v) for k, v in time_series_ns.items()}
         
-        median_velocity_ew = round(df['u_velocity'].median(), 1)
-        median_velocity_sn = round(df['v_velocity'].median(), 1)
+        median_velocity_we = round(df['u_velocity'].median(), 1)
+        median_velocity_ns = round(df['v_velocity'].median(), 1)
 
-        # Compute RMSE for both EW and SN components
-        timestamps = pd.to_datetime(df.index).astype(int) / 1e9  # Convert to seconds since epoch
-        rmse_ew = compute_rmse_polynomial(df['u_velocity'].values, timestamps, degree=3)
-        rmse_sn = compute_rmse_polynomial(df['u_velocity'].values, timestamps, degree=3)
+        # Compute RMSE for both WE and NS components.
+        # Convert timestamps from the DataFrame index to seconds since epoch.
+        timestamps = pd.to_datetime(df.index).astype(int) / 1e9
+        rmse_we = compute_rmse_polynomial(df['u_velocity'].values, timestamps, degree=3)
+        rmse_ns = compute_rmse_polynomial(df['v_velocity'].values, timestamps, degree=3)
 
-        # Prepare the row for the EW component
-        row_ew = {
-            'pid': pid,                      # Unique alphanumeric identifier for the point
+        # Prepare the row for the WE component
+        row_we = {
+            'pid': pid,                      # Unique identifier for the point
             'latitude': lat,                 # Latitude in EPSG:4326
             'longitude': lon,                # Longitude in EPSG:4326
             'x': point[0],                   # Image X-coordinate
             'y': point[1],                   # Image Y-coordinate
-            'median_velocity': median_velocity_ew,  # Add the median velocity for EW
-            'rmse': round(rmse_ew, 2)        # Add RMSE for EW
+            'median_velocity': median_velocity_we,  # Median velocity for WE
+            'rmse': round(rmse_we, 2)        # RMSE for WE
         }
-        row_ew.update(time_series_ew)  # Add time series data for EW
-        csv_data_ew.append(row_ew)
+        row_we.update(time_series_we)  # Add WE time series data
+        csv_data_we.append(row_we)
 
-        # Prepare the row for the SN component
-        row_sn = {
-            'pid': pid,                      # Unique alphanumeric identifier for the point
+        # Prepare the row for the NS component
+        row_ns = {
+            'pid': pid,                      # Unique identifier for the point
             'latitude': lat,                 # Latitude in EPSG:4326
             'longitude': lon,                # Longitude in EPSG:4326
             'x': point[0],                   # Image X-coordinate
             'y': point[1],                   # Image Y-coordinate
-            'median_velocity': median_velocity_sn,  # Add the median velocity for SN
-            'rmse': round(rmse_sn, 2)        # Add RMSE for SN
+            'median_velocity': median_velocity_ns,  # Median velocity for NS
+            'rmse': round(rmse_ns, 2)        # RMSE for NS
         }
-        row_sn.update(time_series_sn)  # Add time series data for SN
-        csv_data_sn.append(row_sn)
+        row_ns.update(time_series_ns)  # Add NS time series data
+        csv_data_ns.append(row_ns)
 
     # Convert the lists of dictionaries to DataFrames
-    formatted_csv_ew = pd.DataFrame(csv_data_ew)
-    formatted_csv_sn = pd.DataFrame(csv_data_sn)
+    formatted_csv_we = pd.DataFrame(csv_data_we)
+    formatted_csv_ns = pd.DataFrame(csv_data_ns)
 
-    return formatted_csv_ew, formatted_csv_sn
+    return formatted_csv_we, formatted_csv_ns
 
 def plot_fastest_points_components(csv_data_ew, csv_data_sn, top_n=5):
     """
