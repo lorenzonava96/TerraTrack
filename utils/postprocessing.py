@@ -657,13 +657,13 @@ def process_mask(mask):
     #plt.show()
     
     # 'thin' by one iteration.
-    mask = thin(mask, max_iter=1)
-    plt.figure(figsize=(6,6))
-    plt.imshow(mask, cmap='gray')
-    plt.title("Mask after 'thin'")
-    plt.colorbar()
-    plt.tight_layout()
-    plt.show()
+    mask = thin(mask, max_num_iter=1)
+    #plt.figure(figsize=(6,6))
+    #plt.imshow(mask, cmap='gray')
+    #plt.colorbar()
+    #plt.title("Mask after 'thin'")
+    #plt.tight_layout()
+    #plt.show()
     
     return mask
 
