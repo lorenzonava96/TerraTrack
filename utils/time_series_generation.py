@@ -321,4 +321,3 @@ def plot_fastest_points_components(csv_data_ew, csv_data_sn, top_n=5):
         plt.grid()
         plt.tight_layout()
         plt.show()
-
