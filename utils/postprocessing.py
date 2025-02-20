@@ -519,7 +519,7 @@ def overlay_magnitude_map(study_area_image, magnitude_map, block_size, overlap):
     plt.ylabel('Height (pixels)')
     plt.show()
 
-def create_raster_maps(feature_points, u_values, v_values, block_size, overlap):
+def create_raster_maps(feature_points, u_values, v_values, study_area_image, block_size, overlap):
     """
     Create raster maps for u, v, magnitude, and angle from feature tracking data.
     """
@@ -602,59 +602,59 @@ def process_mask(mask):
     
     # 'bridge': Connect pixels using binary closing with a 3x3 footprint.
     mask = binary_closing(mask, footprint=np.ones((3, 3)))
-    plt.figure(figsize=(6,6))
-    plt.imshow(mask, cmap='gray')
-    plt.title("Mask after 'bridge' (binary closing)")
-    plt.colorbar()
-    plt.tight_layout()
-    plt.show()
+    #plt.figure(figsize=(6,6))
+    #plt.imshow(mask, cmap='gray')
+    #plt.title("Mask after 'bridge' (binary closing)")
+    #plt.colorbar()
+    #plt.tight_layout()
+    #plt.show()
     
     # 'thicken' by one iteration: simulate by binary dilation.
     mask = binary_dilation(mask)
-    plt.figure(figsize=(6,6))
-    plt.imshow(mask, cmap='gray')
-    plt.title("Mask after first 'thicken' (binary dilation)")
-    plt.colorbar()
-    plt.tight_layout()
-    plt.show()
+    #plt.figure(figsize=(6,6))
+    #plt.imshow(mask, cmap='gray')
+    #plt.title("Mask after first 'thicken' (binary dilation)")
+    #plt.colorbar()
+    #plt.tight_layout()
+    #plt.show()
     
     # Apply 'bridge' again.
     mask = binary_closing(mask, footprint=np.ones((3, 3)))
-    plt.figure(figsize=(6,6))
-    plt.imshow(mask, cmap='gray')
-    plt.title("Mask after second 'bridge' (binary closing)")
-    plt.colorbar()
-    plt.tight_layout()
-    plt.show()
+    #plt.figure(figsize=(6,6))
+    #plt.imshow(mask, cmap='gray')
+    #plt.title("Mask after second 'bridge' (binary closing)")
+    #plt.colorbar()
+    #plt.tight_layout()
+    #plt.show()
     
     # 'thicken' again.
     mask = binary_dilation(mask)
-    plt.figure(figsize=(6,6))
-    plt.imshow(mask, cmap='gray')
-    plt.title("Mask after second 'thicken' (binary dilation)")
-    plt.colorbar()
-    plt.tight_layout()
-    plt.show()
+    #plt.figure(figsize=(6,6))
+    #plt.imshow(mask, cmap='gray')
+    #plt.title("Mask after second 'thicken' (binary dilation)")
+    #plt.colorbar()
+    #plt.tight_layout()
+    #plt.show()
     
     # 'majority': Set pixel to True if 5 or more pixels in its 3x3 neighborhood are True.
     kernel = np.ones((3, 3))
     neighbor_count = convolve(mask.astype(np.uint8), kernel, mode='constant', cval=0)
     mask = neighbor_count >= 5
-    plt.figure(figsize=(6,6))
-    plt.imshow(mask, cmap='gray')
-    plt.title("Mask after 'majority' filtering")
-    plt.colorbar()
-    plt.tight_layout()
-    plt.show()
+    #plt.figure(figsize=(6,6))
+    #plt.imshow(mask, cmap='gray')
+    #plt.title("Mask after 'majority' filtering")
+    #plt.colorbar()
+    #plt.tight_layout()
+    #plt.show()
     
     # 'fill': Fill holes in the binary mask.
     mask = binary_fill_holes(mask)
-    plt.figure(figsize=(6,6))
-    plt.imshow(mask, cmap='gray')
-    plt.title("Mask after 'fill' (hole filling)")
-    plt.colorbar()
-    plt.tight_layout()
-    plt.show()
+    #plt.figure(figsize=(6,6))
+    #plt.imshow(mask, cmap='gray')
+    #plt.title("Mask after 'fill' (hole filling)")
+    #plt.colorbar()
+    #plt.tight_layout()
+    #plt.show()
     
     # 'thin' by one iteration.
     mask = thin(mask, max_iter=1)
