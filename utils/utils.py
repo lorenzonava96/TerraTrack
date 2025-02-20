@@ -34,7 +34,7 @@ def handle_predictions(
                 "all_u": list(loaded_data['all_u']),
                 "all_v": list(loaded_data['all_v']),
                 "all_feature_points": list(loaded_data['all_feature_points']),
-                "all_max_corrs": list(loaded_data['all_max_corrs']),
+                "all_pkrs": list(loaded_data['all_pkrs']),
                 "all_snrs": list(loaded_data['all_snrs']),
                 "separation": loaded_data['separation'],
                 "study_area_image": loaded_data['study_area_image'],
@@ -49,21 +49,21 @@ def handle_predictions(
 
     # Initialize lists to store results
     all_u, all_v, all_feature_points = [], [], []
-    all_max_corrs, all_snrs = [], []
+    all_pkrs, all_snrs = [], []
 
     # Process the results to populate data
     for result in results:
         all_u.append(result['u'])
         all_v.append(result['v'])
         all_feature_points.append(result['feature_points'])
-        all_max_corrs.append(result['max_corrs'])
+        all_pkrs.append(result['pkrs'])
         all_snrs.append(result['snrs'])
 
     data = {
         "all_u": np.array(all_u, dtype=object),
         "all_v": np.array(all_v, dtype=object),
         "all_feature_points": np.array(all_feature_points, dtype=object),
-        "all_max_corrs": np.array(all_max_corrs, dtype=object),
+        "all_pkrs": np.array(all_pkrs, dtype=object),
         "all_snrs": np.array(all_snrs, dtype=object),
         "separation": separation,
         "study_area_image": orig[..., 0],
@@ -78,7 +78,7 @@ def handle_predictions(
         all_u=data["all_u"],
         all_v=data["all_v"],
         all_feature_points=data["all_feature_points"],
-        all_max_corrs=data["all_max_corrs"],
+        all_pkrs=data["all_pkrs"],
         all_snrs=data["all_snrs"],
         separation=data["separation"],
         study_area_image=data["study_area_image"],
