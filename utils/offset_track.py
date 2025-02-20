@@ -47,14 +47,14 @@ def displacement_analysis(
     if filter_params is None:
         filter_params = {}
 
-    u, v, feature_points, max_corrs, snrs = None, None, None, None, None
+    u, v, feature_points, pkrs, snrs = None, None, None, None, None
 
     # Step 1: Compute displacements using the selected method
     if method == 'optical_flow':
-        feature_points, u, v, max_corrs, snrs  = dense_optical_flow_displacement(img1, img2)
+        feature_points, u, v, pkrs, snrs  = dense_optical_flow_displacement(img1, img2)
 
     elif method == 'block_matching':
-        feature_points, u, v, max_corrs, snrs = block_matching_vectorized(
+        feature_points, u, v, pkrs, snrs = block_matching_vectorized(
             img1, img2, block_size=block_size, overlap=overlap, match_func=match_func
         )
     else:
@@ -62,7 +62,7 @@ def displacement_analysis(
 
     # Step 2: Filter displacements
     u, v, feature_points = filter_displacements(
-        u, v, feature_points, zero_mask, snr_values=snrs,
+        u, v, feature_points, zero_mask, pkr_values=pkrs, snr_values=snrs,
         **filter_params
     )
 
@@ -70,7 +70,7 @@ def displacement_analysis(
     if plot and feature_points.size > 0:
         plot_displacement_field(u, v, feature_points, img1, arrow_scale=arrow_scale)
 
-    return u, v, feature_points, max_corrs, snrs
+    return u, v, feature_points, pkrs, snrs
 
 def dense_optical_flow_displacement(img1, img2):
     """
@@ -144,7 +144,7 @@ def block_matching_vectorized(img1, img2, block_size=16, overlap=0.8, match_func
 
     def fft_ncc(block1, block2, subpixel_method="center_of_mass"):
         """
-        Perform template matching using FFT for subpixel accuracy and calculate SNR.
+        Perform template matching using FFT for subpixel accuracy and calculate both PKR and SNR.
 
         Parameters:
         - block1: The reference block (template).
@@ -158,7 +158,8 @@ def block_matching_vectorized(img1, img2, block_size=16, overlap=0.8, match_func
         - dx: Subpixel horizontal displacement.
         - dy: Subpixel vertical displacement.
         - max_corr: Maximum correlation value (goodness of fit).
-        - snr: Signal-to-noise ratio.
+        - pkr: Peak-to-peak ratio.
+        - snr: Signal-to-noise ratio per block.
         """
         # Ensure blocks are float32 for FFT operations
         block1 = block1.astype(np.float32)
@@ -183,23 +184,37 @@ def block_matching_vectorized(img1, img2, block_size=16, overlap=0.8, match_func
         peak_idx = np.unravel_index(np.argmax(cross_corr), cross_corr.shape)
         max_corr = cross_corr[peak_idx]
 
-        # Find the second-highest peak
+        # Compute mean absolute correlation (for SNR)
+        mean_corr = np.mean(np.abs(cross_corr))
+
+        # Compute SNR: max_corr / mean(abs(cross_corr))
+        snr = max_corr / (mean_corr + 1e-10)
+
+        # Find second-highest peak with buffer
+        buffer_size = 1
         cross_corr_temp = cross_corr.copy()
-        cross_corr_temp[peak_idx] = -np.inf  # Prevent selecting again
+
+        # Mask out the surrounding buffer region
+        i, j = peak_idx
+        h, w = cross_corr.shape
+        cross_corr_temp[max(0, i - buffer_size):min(h, i + buffer_size + 1),
+                        max(0, j - buffer_size):min(w, j + buffer_size + 1)] = -np.inf
+
+        # Find the second peak
         second_idx = np.unravel_index(np.argmax(cross_corr_temp), cross_corr_temp.shape)
         second_peak = cross_corr_temp[second_idx]
 
-        # Peak-to-peak SNR
-        snr = max_corr / (second_peak + 1e-10)
+        # Compute Peak-to-Peak Ratio (PKR)
+        pkr = max_corr / (second_peak + 1e-10)
 
         # Subpixel refinement
         if subpixel_method == "center_of_mass":
             # Center of mass refinement around peak
             window_size = 3
-            x_min = max(0, peak_idx[1] - window_size // 2)
-            x_max = min(cross_corr.shape[1], peak_idx[1] + window_size // 2 + 1)
-            y_min = max(0, peak_idx[0] - window_size // 2)
-            y_max = min(cross_corr.shape[0], peak_idx[0] + window_size // 2 + 1)
+            x_min = max(0, j - window_size // 2)
+            x_max = min(cross_corr.shape[1], j + window_size // 2 + 1)
+            y_min = max(0, i - window_size // 2)
+            y_max = min(cross_corr.shape[0], i + window_size // 2 + 1)
 
             local_window = cross_corr[y_min:y_max, x_min:x_max]
             refined_y, refined_x = center_of_mass(local_window)
@@ -209,20 +224,17 @@ def block_matching_vectorized(img1, img2, block_size=16, overlap=0.8, match_func
             refined_y += y_min - cross_corr.shape[0] // 2
 
         elif subpixel_method == "quadratic":
-            # Quadratic peak fitting
-            refined_x = quadratic_interpolation(cross_corr[peak_idx[0], :], peak_idx[1])
-            refined_y = quadratic_interpolation(cross_corr[:, peak_idx[1]], peak_idx[0])
+            refined_x = quadratic_interpolation(cross_corr[i, :], j)
+            refined_y = quadratic_interpolation(cross_corr[:, j], i)
 
         elif subpixel_method == "parabolic":
-            # Parabolic interpolation
-            refined_x = parabolic_interpolation(cross_corr[peak_idx[0], :], peak_idx[1])
-            refined_y = parabolic_interpolation(cross_corr[:, peak_idx[1]], peak_idx[0])
+            refined_x = parabolic_interpolation(cross_corr[i, :], j)
+            refined_y = parabolic_interpolation(cross_corr[:, j], i)
 
         else:
             raise ValueError("Invalid subpixel_method. Choose from 'center_of_mass', 'quadratic', or 'parabolic'.")
 
-        return refined_x, refined_y, max_corr, snr
-
+        return refined_x, refined_y, pkr, snr
 
     def quadratic_interpolation(values, peak_index):
         """
@@ -325,15 +337,15 @@ def block_matching_vectorized(img1, img2, block_size=16, overlap=0.8, match_func
     u = np.zeros(num_blocks)
     v = np.zeros(num_blocks)
     errors = np.zeros(num_blocks)
-    max_corrs = np.zeros(num_blocks)  # Store max_corr for each block
+    pkrs = np.zeros(num_blocks)  # Store pkr for each block
     snrs = np.zeros(num_blocks)      # Store SNR for each block
 
     # Apply the matching function vectorized over all blocks
     for idx in range(num_blocks):
-        dx, dy, max_corr, snr = match_func_callable(blocks1[idx], blocks2[idx])
+        dx, dy, pkr, snr = match_func_callable(blocks1[idx], blocks2[idx])
         u[idx] = -dx
         v[idx] = -dy
-        max_corrs[idx] = max_corr
+        pkrs[idx] = pkr
         snrs[idx] = snr
 
     # Generate feature point coordinates
@@ -343,7 +355,7 @@ def block_matching_vectorized(img1, img2, block_size=16, overlap=0.8, match_func
     )
     feature_points = np.column_stack([grid_x.ravel(), grid_y.ravel()])
 
-    return feature_points, u, v, max_corrs, snrs
+    return feature_points, u, v, pkrs, snrs
 
 
 def filter_displacements(
@@ -366,10 +378,12 @@ def filter_displacements(
     apply_erratic_displacement_filter=False, 
     neighborhood_size=5, 
     deviation_threshold=2,
-    # New parameters for SNR filtering
+    pkr_values=None,
+    apply_pkr_filter=False,
+    pkr_threshold=1.3,
     snr_values=None,
     apply_snr_filter=False,
-    snr_threshold=1.5
+    snr_threshold=3
 ):
     """
     Filter displacement vectors and optionally remove erratic displacements.
@@ -496,7 +510,18 @@ def filter_displacements(
         u[valid_mask] = u_valid_filtered
         v[valid_mask] = v_valid_filtered
 
-    # Step 8: Apply SNR filter (only if we have at least one valid SNR)
+    # Step 8: Apply PKR filter (only if we have at least one valid PKR)
+    if apply_pkr_filter and pkr_values is not None:
+        # If the entire array is NaN, skip the PKR filter:
+        if np.isnan(pkr_values).all():
+            pass
+            # print("PKR array is all NaN. Skipping PKR filter...")
+        else:
+            # Apply your PKR filtering logic here
+            pkr_mask = pkr_values >= pkr_threshold
+            valid_mask &= pkr_mask
+
+    # Step 9: Apply SNR filter (only if we have at least one valid SNR)
     if apply_snr_filter and snr_values is not None:
         # If the entire array is NaN, skip the SNR filter:
         if np.isnan(snr_values).all():
@@ -571,7 +596,7 @@ def process_image_pairs(dat1, dat2, datax, preprocessed_stack, filter_params, ze
             img1, img2 = preprocessed_stack[:, :, idx1], preprocessed_stack[:, :, idx2]
 
             # Perform displacement analysis
-            u, v, feature_points, max_corrs, snrs = displacement_analysis(
+            u, v, feature_points, pkrs, snrs = displacement_analysis(
                 img1=img1,
                 img2=img2,
                 method=method,
@@ -589,7 +614,7 @@ def process_image_pairs(dat1, dat2, datax, preprocessed_stack, filter_params, ze
                     "u": u,
                     "v": v,
                     "feature_points": feature_points,
-                    "max_corrs" : max_corrs,
+                    "pkrs" : pkrs,
                     "snrs" : snrs,
                     "img1": img1
                 }
