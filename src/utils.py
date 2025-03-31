@@ -90,3 +90,22 @@ def handle_predictions(
     print(f"- Compressed NumPy file: {file_path}")
 
     return data
+
+def play_alert():
+    """
+    Plays a short trilling alert tone — useful as a simple notification sound.
+    """
+    import numpy as np
+    from IPython.display import Audio
+
+    fs = 44100       
+    duration = 1      
+    f1, f2 = 880, 660 
+
+    t = np.linspace(0, duration, int(fs * duration), False)
+    trill_pattern = ((np.floor(t * 10) % 2) == 0)  
+
+    freq = np.where(trill_pattern, f1, f2)
+    signal = np.sin(2 * np.pi * freq * t)
+
+    return Audio(signal, rate=fs, autoplay=True)
