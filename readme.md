@@ -10,18 +10,18 @@ It is fully reproducible via Google Colab and supports scalable motion analysis 
 
 ---
 
-## 🚀 Features
+## Features
 
 - Automated Sentinel-2 image acquisition via Earth Engine API
 - Multiple feature tracking methods:
-  - FFT-based Normalized Cross-Correlation (**NCC**)
+  - FFT-based Normalized Cross-Correlation (**FFT-NCC**)
   - Phase Cross-Correlation (**PCC**)
-  - Dense Optical Flow (Farneback)
+  - Median Dense Optical Flow (Farneback)
 - Custom filtering pipeline:
   - Magnitude, angular coherence, PKR/SNR thresholds
-  - Slope/aspect-based filtering, DBSCAN clustering
+  - Slope/aspect-based filtering, clustering
 - Time series reconstruction using weighted or midpoint binning
-- Export-ready output formats for QGIS and TICOI
+- Export-ready, georeferenced median velocity maps and displacement time series, compatible with InSAR Explorer in QGIS.
 
 ---
 
