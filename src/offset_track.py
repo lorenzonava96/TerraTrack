@@ -173,16 +173,8 @@ from numpy.lib.stride_tricks import sliding_window_view
 from skimage.registration import phase_cross_correlation
 
 # ------------------------------
-# Helper Functions for Subpixel Refinement
+# Helper Function for Subpixel Refinement
 # ------------------------------
-def quadratic_interpolation(values, peak_index):
-    """Quadratic interpolation for subpixel refinement."""
-    if peak_index <= 0 or peak_index >= len(values) - 1:
-        return peak_index  # No interpolation at edges
-    left = values[peak_index - 1]
-    center = values[peak_index]
-    right = values[peak_index + 1]
-    return peak_index + (right - left) / (2 * (2 * center - left - right))
 
 def parabolic_interpolation(values, peak_index):
     """Parabolic interpolation for subpixel refinement."""
@@ -258,9 +250,6 @@ def batch_fft_ncc(blocks1, blocks2, subpixel_method="parabolic"):
             # Convert from local window to block-centered coordinates:
             dx[k] = refined_x + x_min - bs // 2
             dy[k] = refined_y + y_min - bs // 2
-        elif subpixel_method == "quadratic":
-            dx[k] = quadratic_interpolation(block[i, :], j)
-            dy[k] = quadratic_interpolation(block[:, j], i)
         elif subpixel_method == "parabolic":
             dx[k] = parabolic_interpolation(block[i, :], j)
             dy[k] = parabolic_interpolation(block[:, j], i)
@@ -277,7 +266,7 @@ def phase_cross_corr_vec(block1, block2):
     shifts, error, _ = phase_cross_correlation(block1, block2, upsample_factor=10)
     return shifts[1], shifts[0], None, None
 
-def mean_dense_optical_flow(block1, block2):
+def mdian_dense_optical_flow(block1, block2):
     """Matching using dense optical flow (non-batchable)."""
     flow = cv2.calcOpticalFlowFarneback(
         block1, block2, None, 
@@ -308,7 +297,7 @@ def block_matching_vectorized(img1, img2, block_size=16, overlap=0.8,
       block_size: Size of the blocks to compare.
       overlap: Overlap percentage between blocks (0 to 1).
       match_func: Matching function to use. Options:
-                  'phase_cross_corr', 'fft_ncc', 'mean_optical_flow',
+                  'phase_cross_corr', 'fft_ncc', 'mdian_dense_optical_flow',
                   or a custom callable.
       subpixel_method: Subpixel refinement method ('center_of_mass', 'quadratic', 'parabolic')
                        (only used if match_func is 'fft_ncc').
@@ -342,7 +331,7 @@ def block_matching_vectorized(img1, img2, block_size=16, overlap=0.8,
         # Map available matching functions to their implementations.
         match_func_map = {
             'phase_cross_corr': phase_cross_corr_vec,
-            'mean_optical_flow': mean_dense_optical_flow,
+            'mdian_dense_optical_flow': mdian_dense_optical_flow,
         }
         if callable(match_func):
             match_func_callable = match_func
