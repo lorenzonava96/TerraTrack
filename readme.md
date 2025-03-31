@@ -37,7 +37,36 @@ Click the badge below to launch:
 
 ### 🖥️ Run Locally
 
-1. Clone the repo:
-   ```bash
-   git clone https://github.com/lorenzonava96/TerraTrack.git
-   cd TerraTrack
+```bash
+git clone https://github.com/lorenzonava96/TerraTrack.git
+cd TerraTrack
+jupyter notebook notebooks/TerraTrack_v1.0.ipynb
+```
+
+## Repository Structure
+```bash
+
+TerraTrack/
+├── notebooks/           # Main notebook(s)
+├── src/                 # Python modules (optional)
+├── figures/             # Logo, plots, visuals
+├── data/                # Sample input/output data (optional)
+├── examples/            # Sample results (optional)
+├── requirements.txt     # Dependencies for local + Colab
+├── LICENSE
+└── README.md
+
+```
+## License
+
+This project is licensed under the [MIT License](LICENSE).
+
+## Citation
+
+A peer-reviewed paper describing TerraTrack is currently in preparation. Citation details will be provided once available.
+
+## Feedback & Support
+
+Have questions, suggestions, or found a bug? Feel free to [open an issue](https://github.com/lorenzonava96/TerraTrack/issues).
+
+
