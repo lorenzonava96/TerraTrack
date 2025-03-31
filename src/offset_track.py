@@ -18,7 +18,7 @@ def displacement_analysis(
     method='block_matching',  # Options: 'optical_flow', 'block_matching'
     block_size=16,
     overlap=0.8,
-    match_func='fft_ncc',  # For block matching: 'phase_cross_corr', 'fft_ncc', 'mean_optical_flow', etc.
+    match_func='fft_ncc',  # For block matching: 'phase_cross_corr', 'fft_ncc', 'median_dense_optical_flow', etc.
     subpixel_method="parabolic",  # Only used if match_func is 'fft_ncc'
     zero_mask=None,  # Optional mask for invalid areas
     filter_params=None,  # Dictionary of parameters for filter_displacements
@@ -48,7 +48,7 @@ def displacement_analysis(
          - 'phase_cross_corr': Uses phase cross-correlation (subpixel refinement is embedded).
          - 'fft_ncc': Uses FFT-based normalized cross-correlation with batch processing;
                       allows selection of subpixel refinement via the `subpixel_method` parameter.
-         - 'mean_optical_flow': Uses dense optical flow within each block.
+         - 'median_dense_optical_flow': Uses dense optical flow within each block.
          - Or a custom function.
         If not provided, a default (e.g., 'phase_cross_corr') is used.
     subpixel_method : str
@@ -79,7 +79,7 @@ def displacement_analysis(
     Notes:
     ------
     - When using optical_flow or default matching functions (e.g., phase_cross_corr or 
-      mean_optical_flow), the subpixel refinement is embedded in the function and the
+      median_dense_optical_flow), the subpixel refinement is embedded in the function and the
       `subpixel_method` parameter is ignored.
     - For the custom NCC ('fft_ncc'), the subpixel refinement strategy is applied as selected,
       and batch processing is used for acceleration.
@@ -266,7 +266,7 @@ def phase_cross_corr_vec(block1, block2):
     shifts, error, _ = phase_cross_correlation(block1, block2, upsample_factor=10)
     return shifts[1], shifts[0], None, None
 
-def mdian_dense_optical_flow(block1, block2):
+def median_dense_optical_flow(block1, block2):
     """Matching using dense optical flow (non-batchable)."""
     flow = cv2.calcOpticalFlowFarneback(
         block1, block2, None, 
@@ -297,7 +297,7 @@ def block_matching_vectorized(img1, img2, block_size=16, overlap=0.8,
       block_size: Size of the blocks to compare.
       overlap: Overlap percentage between blocks (0 to 1).
       match_func: Matching function to use. Options:
-                  'phase_cross_corr', 'fft_ncc', 'mdian_dense_optical_flow',
+                  'phase_cross_corr', 'fft_ncc', 'median_dense_optical_flow',
                   or a custom callable.
       subpixel_method: Subpixel refinement method ('center_of_mass', 'quadratic', 'parabolic')
                        (only used if match_func is 'fft_ncc').
@@ -331,7 +331,7 @@ def block_matching_vectorized(img1, img2, block_size=16, overlap=0.8,
         # Map available matching functions to their implementations.
         match_func_map = {
             'phase_cross_corr': phase_cross_corr_vec,
-            'mdian_dense_optical_flow': mdian_dense_optical_flow,
+            'median_dense_optical_flow': median_dense_optical_flow,
         }
         if callable(match_func):
             match_func_callable = match_func
@@ -586,7 +586,7 @@ def process_image_pairs(dat1, dat2, datax, preprocessed_stack, filter_params, ze
     - method: Method to use ('block_matching' or 'optical_flow').
     - block_size: Block size for block matching.
     - overlap: Overlap percentage for block matching.
-    - match_func: Matching function for block matching (e.g., 'phase_cross_corr', 'fft_ncc', 'mean_optical_flow').
+    - match_func: Matching function for block matching (e.g., 'phase_cross_corr', 'fft_ncc', 'median_dense_optical_flow').
     - subpixel_method: Subpixel refinement method (used only if match_func is 'fft_ncc').
     - max_workers: Maximum number of threads to use (default: os.cpu_count()).
     - parallel: Boolean flag to enable parallel processing (default: True).
