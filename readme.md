@@ -18,6 +18,16 @@ Click the badge below to launch:
 
 ---
 
+### 🖥️ Run Locally
+
+```bash
+git clone https://github.com/lorenzonava96/TerraTrack.git
+cd TerraTrack
+jupyter notebook notebooks/TerraTrack_v1.0.ipynb
+```
+
+---
+
 ## Features
 
 - Automated Sentinel-2 image acquisition via Earth Engine API
@@ -30,16 +40,6 @@ Click the badge below to launch:
   - Slope/aspect-based filtering, clustering
 - Time series reconstruction using weighted or midpoint binning
 - Export-ready, georeferenced median velocity maps and displacement time series, compatible with InSAR Explorer in QGIS.
-
----
-
-### 🖥️ Run Locally
-
-```bash
-git clone https://github.com/lorenzonava96/TerraTrack.git
-cd TerraTrack
-jupyter notebook notebooks/TerraTrack_v1.0.ipynb
-```
 
 ## Repository Structure
 ```bash
