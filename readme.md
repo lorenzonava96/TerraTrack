@@ -29,7 +29,7 @@ It is fully reproducible via Google Colab and supports scalable motion analysis 
 
 Click the badge below to launch:
 
-[![Open In Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://github.com/lorenzonava96/TerraTrack/blob/main/notebooks/TerraTrack_v1.ipynb)
+[![Open In Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/github/lorenzonava96/TerraTrack/blob/main/notebooks/TerraTrack_v1.ipynb)
 
 ---
 
