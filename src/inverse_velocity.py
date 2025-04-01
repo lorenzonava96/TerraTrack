@@ -16,7 +16,7 @@ def estimate_failure_time(dates, inv_velocity, n_points_for_fit=5):
     subset_dates = dates[-n_points_for_fit:]
     subset_invv = inv_velocity[-n_points_for_fit:]
     
-    # Filter out NaNs
+    # Filter out NaNs.
     subset_data = [(d, v) for d, v in zip(subset_dates, subset_invv) if not pd.isna(v)]
     if len(subset_data) < 2:
         return None
@@ -32,11 +32,20 @@ def estimate_failure_time(dates, inv_velocity, n_points_for_fit=5):
     slope = model.coef_[0]
     intercept = model.intercept_
     
-    # Extrapolate to inv_velocity = 0 if slope is negative.
+    # Only proceed if the slope is negative (indicating accelerating displacement)
     if slope < 0:
         t_failure = -intercept / slope
         if t_failure > 0:
-            return t0 + pd.Timedelta(days=t_failure)
+            # Define a cutoff: if the estimated failure time is later than a reasonable date, skip it.
+            cutoff_date = pd.Timestamp('2050-01-01')
+            max_days = (cutoff_date - t0).days
+            if t_failure > max_days:
+                return None
+            try:
+                estimated_date = t0 + pd.Timedelta(days=t_failure)
+            except Exception as e:
+                return None
+            return estimated_date
     return None
 
 def plot_inverse_velocity_monthly(csv_path, output_folder=None, save_plots=False,
@@ -47,9 +56,9 @@ def plot_inverse_velocity_monthly(csv_path, output_folder=None, save_plots=False
     and then aggregated to monthly resolution using the median.
     A plot is created for each PID, with inverse velocity vs. time.
     
-    For each PID, the function attempts to estimate a "time of failure" using each value
-    in n_points_for_fit_list (e.g., 4, 6). Each estimated failure date is plotted with a vertical
-    line (in a different color) and saved in a list.
+    For each PID, the function estimates a "time of failure" using each value
+    in n_points_for_fit_list. The median of the valid estimated failure dates is then used to plot a single
+    vertical line and is stored in the output.
     
     Parameters:
       csv_path : str
@@ -66,7 +75,7 @@ def plot_inverse_velocity_monthly(csv_path, output_folder=None, save_plots=False
       failure_dates : list of dict
           A list of dictionaries, one per PID, with keys:
              'pid': the PID,
-             'failure_dates': a dictionary mapping each n_points value to the estimated failure date.
+             'failure_date': the median estimated failure date.
     """
     df = pd.read_csv(csv_path)
     
@@ -88,9 +97,6 @@ def plot_inverse_velocity_monthly(csv_path, output_folder=None, save_plots=False
     
     failure_dates = []
     
-    # Colors for different n_points_for_fit values.
-    colors = ['r', 'm', 'c', 'orange', 'green']
-    
     for pid in monthly['pid'].unique():
         df_pid = monthly[monthly['pid'] == pid].copy()
         df_pid.sort_values('month', inplace=True)
@@ -105,21 +111,23 @@ def plot_inverse_velocity_monthly(csv_path, output_folder=None, save_plots=False
         plt.ylabel('1 / Velocity')
         plt.grid(True)
         
-        failure_dict = {}
+        failure_estimates = []
         # Try different n_points_for_fit values.
-        for i, n in enumerate(n_points_for_fit_list):
+        for n in n_points_for_fit_list:
             if len(dates) >= n:
                 fd = estimate_failure_time(dates, invv, n_points_for_fit=n)
                 if fd is not None:
-                    failure_dict[n] = fd
-                    # Plot a vertical line for this estimated failure date.
-                    plt.axvline(fd, color=colors[i % len(colors)], linestyle='--', 
-                                label=f'Failure (n={n}): {fd.date()}')
+                    failure_estimates.append(fd)
         
-        if failure_dict:
+        if failure_estimates:
+            # Compute the median failure date from the valid estimates.
+            median_ns = np.median([fd.value for fd in failure_estimates])
+            median_failure = pd.Timestamp(int(median_ns))
+            plt.axvline(median_failure, color='r', linestyle='--',
+                        label=f'Median Failure: {median_failure.date()}')
             plt.legend()
+            failure_dates.append({'pid': pid, 'failure_date': median_failure})
         
-        # Save or display the plot based on parameters.
         if save_plots and output_folder is not None:
             out_path = f"{output_folder}/{pid}_inverse_velocity_monthly.png"
             plt.savefig(out_path, dpi=150, bbox_inches='tight')
@@ -127,8 +135,6 @@ def plot_inverse_velocity_monthly(csv_path, output_folder=None, save_plots=False
             print(f"Saved plot for {pid} to {out_path}")
         else:
             plt.show()
-        
-        failure_dates.append({'pid': pid, 'failure_dates': failure_dict})
     
     return failure_dates
 
@@ -137,27 +143,21 @@ def failure_date_statistics(failure_dates_list):
     Compute statistics on a list of failure dates to determine the most probable failure month.
     
     This function expects each element in failure_dates_list to be a dictionary with keys:
-      'pid' and 'failure_dates', where 'failure_dates' is a dictionary mapping sample sizes
-      (e.g., 4, 6) to a failure date (a pandas Timestamp).
+      'pid' and 'failure_date' (a pandas Timestamp).
     
     Parameters:
       failure_dates_list : list of dict
-          Each dictionary has keys 'pid' and 'failure_dates'. 'failure_dates' is itself a dict,
-          e.g., {4: Timestamp(...), 6: Timestamp(...)}.
+          Each dictionary has keys 'pid' and 'failure_date'.
           
     Returns:
       month_counts : pandas Series
           A Series with monthly periods as index (in YYYY-MM format) and counts as values.
     """
+    import pandas as pd
     
-    # Collect all failure dates from the nested dictionaries.
-    all_failure_dates = []
-    for item in failure_dates_list:
-        fd_dict = item.get('failure_dates', {})
-        # Loop over each sample size and its failure date
-        for sample_size, fd in fd_dict.items():
-            if fd is not None:
-                all_failure_dates.append(fd)
+    # Collect all non-None failure dates.
+    all_failure_dates = [item['failure_date'] for item in failure_dates_list 
+                         if item.get('failure_date') is not None]
     
     if not all_failure_dates:
         print("No failure dates available.")
@@ -169,7 +169,7 @@ def failure_date_statistics(failure_dates_list):
     # Convert each timestamp to a monthly period (YYYY-MM)
     month_periods = dates_series.dt.to_period('M')
     
-    # Count the frequency of each month and sort by index.
+    # Count the frequency of each month and sort the result.
     month_counts = month_periods.value_counts().sort_index()
     
     # Determine the mode (the month with the highest count)
@@ -190,8 +190,11 @@ def plot_failure_distribution(month_counts):
     Returns:
       None. Displays the plot.
     """
-    # Use a clean style for publication-quality figures.
-    plt.style.use('seaborn-whitegrid')
+    # Try to use the seaborn-whitegrid style; if it's not available, use default style.
+    try:
+        plt.style.use('seaborn-whitegrid')
+    except Exception as e:
+        print("Warning: 'seaborn-whitegrid' style not found; using default style.")
     
     # Convert the index to string labels for the x-axis.
     x_labels = month_counts.index.astype(str)
@@ -212,23 +215,13 @@ def plot_failure_distribution(month_counts):
     plt.xticks(rotation=45, ha='right', fontsize=12)
     plt.yticks(fontsize=12)
     
-    # Add vertical line at June 2022.
-    # Since x_labels are categorical, find the index of "2022-06".
+    # # Add a vertical line at the target month (example: "2023-09").
+    # target_month = "2023-09"
     # x_list = list(x_labels)
-    # target_month = "2022-06"
     # if target_month in x_list:
     #     pos = x_list.index(target_month)
     #     ax.axvline(x=pos, color='red', linestyle='--', label=f'Month of Failure: {target_month}')
-        # ax.legend(fontsize=12)
-    
-    # Optionally, annotate each bar with its height (if desired)
-    # for bar in bars:
-    #     height = bar.get_height()
-    #     ax.annotate(f'{height:.0f}',
-    #                 xy=(bar.get_x() + bar.get_width() / 2, height),
-    #                 xytext=(0, 5),  # vertical offset
-    #                 textcoords="offset points",
-    #                 ha='center', va='bottom', fontsize=12)
+    #     ax.legend(fontsize=12)
     
     plt.tight_layout()
     plt.show()
