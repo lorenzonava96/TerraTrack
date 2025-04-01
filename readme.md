@@ -8,6 +8,16 @@ It is fully reproducible via Google Colab and supports scalable motion analysis 
 
 ---
 
+## 📒 Get Started
+
+### ▶️ Run in Google Colab (Recommended)
+
+Click the badge below to launch:
+
+[![Open In Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/github/lorenzonava96/TerraTrack/blob/main/notebooks/TerraTrack_v1.ipynb)
+
+---
+
 ## Features
 
 - Automated Sentinel-2 image acquisition via Earth Engine API
@@ -20,16 +30,6 @@ It is fully reproducible via Google Colab and supports scalable motion analysis 
   - Slope/aspect-based filtering, clustering
 - Time series reconstruction using weighted or midpoint binning
 - Export-ready, georeferenced median velocity maps and displacement time series, compatible with InSAR Explorer in QGIS.
-
----
-
-## 📒 Get Started
-
-### ▶️ Run in Google Colab (Recommended)
-
-Click the badge below to launch:
-
-[![Open In Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/github/lorenzonava96/TerraTrack/blob/main/notebooks/TerraTrack_v1.ipynb)
 
 ---
 
