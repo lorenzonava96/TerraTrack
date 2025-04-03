@@ -9,6 +9,9 @@ import random, string
 import rasterio
 from pyproj import Transformer
 import pandas as pd
+from skimage.transform import resize
+import imageio.v2 as imageio
+import io
 
 def accumulate_displacement_with_placeholders(all_u, all_v, all_feature_points, separation,
                                                 median_feature_points, dat1, dat2, pixel_size,
@@ -314,7 +317,7 @@ def plot_fastest_points_components(csv_data_ew, csv_data_sn, top_n=5):
         values_sn = time_series_sn.values
 
         # Plot the time series for EW and SN components
-        plt.figure(figsize=(12, 6))
+        plt.figure(figsize=(6, 3))
         plt.scatter(dates_ew, values_ew, label=f'EW-Component (Median Velocity: {median_velocity_ew:.2f} m/year)', marker='o')
         plt.scatter(dates_sn, values_sn, label=f'NS-Component (Median Velocity: {median_velocity_sn:.2f} m/year)', marker='x')
         plt.title(f'Time Series for Point {point}')
@@ -437,7 +440,7 @@ def resample_daily_series(daily_series_dict, months_per_bin=1):
         df.set_index('date', inplace=True)
         # For annual aggregation, use frequency 'A'; otherwise, use f'{months_per_bin}M'
         if months_per_bin == 12:
-            freq = 'A'
+            freq = 'YE'
         else:
             freq = f'{months_per_bin}ME'
         # Resample using the median as the aggregation function.
@@ -672,3 +675,102 @@ def merge_monthly_estimates_with_format(monthly_estimates_u, monthly_estimates_v
         merged_estimates[point] = merged_df.reset_index(drop=True)
     
     return merged_estimates
+
+def get_cartesian_points_from_mask(mask, target_shape):
+    """
+    Resample a boolean mask to the target shape and return the cartesian (x, y)
+    coordinates of all True pixels.
+
+    Parameters:
+      mask (np.ndarray): Original boolean mask.
+      target_shape (tuple): Desired shape (height, width) to resample to.
+
+    Returns:
+      np.ndarray: An array of shape (N, 2) where each row is [x, y]. Here,
+                  x corresponds to the column index and y to the row index.
+    """
+    # Resample the mask to target shape using nearest-neighbor interpolation.
+    # 'order=0' ensures that boolean values are preserved.
+    resampled_mask = resize(mask.astype(np.uint8), target_shape, order=0, 
+                            preserve_range=True).astype(bool)
+    
+    # Get the row, col indices where the mask is True.
+    rows, cols = np.where(resampled_mask)
+    # Convert to (x, y) coordinates: x = column, y = row.
+    points = np.column_stack((cols, rows))
+    return points
+
+def create_gif_with_background_and_colorbar(tif_path, study_area_image, output_gif, duration=1.0, cmap="viridis", alpha=0.6):
+    """
+    Create a GIF from a multi-band GeoTIFF where each band is overlaid on the 
+    study_area_image as background. Only magnitude values ≥ 0.2 are shown; values
+    below 0.2 are fully transparent. A colorbar (ranging from 0 to the overall maximum 
+    magnitude) is added on the side.
+    
+    Parameters:
+      tif_path (str): Path to the multi-band GeoTIFF (e.g., f"{output_dir}_magnitude_multiband.tif").
+      study_area_image (np.ndarray): Background image array. Its resolution should match the composite.
+      output_gif (str): Path where the output GIF will be saved.
+      duration (float): Duration (in seconds) for each frame in the GIF.
+      cmap (str): Colormap to use for the magnitude overlay.
+      alpha (float): Transparency for the overlay (applied to visible values).
+    """
+    # First, compute the overall maximum value across all bands (ignoring nodata and zeros).
+    with rasterio.open(tif_path) as src:
+        num_bands = src.count
+        nodata = src.nodata
+        overall_max = 0
+        for band in range(2, num_bands + 1):
+            band_data = src.read(band)
+            valid_data = band_data[(band_data != nodata) & (band_data != 0)]
+            if valid_data.size > 0:
+                current_max = valid_data.max()
+                overall_max = max(overall_max, current_max)
+    
+    print(f"Overall maximum magnitude (ignoring zeros and nodata): {overall_max}")
+    
+    frames = []
+    with rasterio.open(tif_path) as src:
+        num_bands = src.count
+        print(f"Found {num_bands} bands in {tif_path}.")
+        for band in range(2, num_bands + 1):
+            # Read the band data.
+            band_data = src.read(band)
+            # Mask out values below 0.2.
+            # This will mask all values < 0.2 so they are not shown.
+            masked_data = np.ma.masked_less(band_data, 0.2)
+            
+            # Get a copy of the colormap and set its "bad" (masked) color to be fully transparent.
+            cmap_instance = plt.get_cmap(cmap).copy()
+            cmap_instance.set_bad(color=(0, 0, 0, 0))
+            
+            # Create a figure.
+            fig, ax = plt.subplots(figsize=(8, 6))
+            
+            # Display the study area image as the background.
+            ax.imshow(study_area_image, cmap="gray")
+            
+            # Overlay the magnitude data.
+            # We use vmin=0.2 so that the color scale starts at 0.2 (values below are masked).
+            im = ax.imshow(masked_data, cmap=cmap_instance, vmin=0.2, vmax=overall_max, alpha=alpha)
+            
+            ax.axis("off")
+            ax.set_title(f"Band {band}", fontsize=14)
+            
+            # Add a colorbar on the side.
+            cbar = fig.colorbar(im, ax=ax, fraction=0.046, pad=0.04)
+            cbar.set_label("Magnitude", rotation=270, labelpad=15)
+            
+            # Save the figure to an in-memory buffer.
+            buf = io.BytesIO()
+            plt.savefig(buf, format="png", bbox_inches="tight", pad_inches=0)
+            plt.close(fig)
+            buf.seek(0)
+            
+            # Read the image from the buffer and add it to the list of frames.
+            img = imageio.imread(buf)
+            frames.append(img)
+    
+    # Save all frames as a GIF.
+    imageio.mimsave(output_gif, frames, duration=duration)
+    print(f"GIF saved to {output_gif}")
