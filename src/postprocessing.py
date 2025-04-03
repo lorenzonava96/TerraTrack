@@ -8,6 +8,8 @@ from sklearn.cluster import DBSCAN
 from rasterio.transform import from_bounds
 import cv2
 from skimage.morphology import thin, binary_closing, binary_dilation
+import os
+from rasterio.transform import Affine
 
 def resample_morpho_to_match(orig_shape, morpho_path, output_path):
     """
@@ -705,3 +707,114 @@ def save_as_geotiff(orig_path, output_path, magnitude_map, block_size, overlap):
         transform=transform,
     ) as dst:
         dst.write(magnitude_map, 1)
+
+def create_multiband_magnitude_tif(velocity_estimates, study_area_image, output_dir, block_size, overlap, output_filename="magnitude_multiband.tif"):
+    """
+    Create a multi-band GeoTIFF containing magnitude values for each time step from velocity estimates.
+    Each band in the output corresponds to one time step.
+    
+    Parameters:
+      velocity_estimates : dict
+          Dictionary keyed by a tuple representing the original image pixel coordinates (x, y)
+          of each chip. Each value is a DataFrame with time series information and must include 
+          the columns 'formatted_date', 'u_velocity', and 'v_velocity'.
+      study_area_image : np.ndarray
+          The reference image (as a NumPy array) used to define the overall extent (height, width).
+      output_dir : str
+          Directory where the output raster will be written. It should also contain the reference 
+          GeoTIFF ('S2_Composite_Filtered_8bit.tif').
+      block_size : int
+          Size (in pixels) of each chip (assumed square).
+      overlap : float
+          Overlap fraction between blocks (from 0.0 to 1.0).
+      output_filename : str
+          Name of the output multi-band GeoTIFF.
+    
+    Returns:
+      The full path to the output GeoTIFF file.
+    """
+    # Calculate effective step size.
+    step_size = int(block_size * (1 - overlap))
+    
+    # Determine grid dimensions based on the block size and overlap.
+    image_height, image_width = study_area_image.shape[:2]
+    grid_height = (image_height - block_size) // step_size + 1
+    grid_width  = (image_width  - block_size) // step_size + 1
+    new_raster_shape = (grid_height, grid_width)
+    
+    # Open the reference GeoTIFF to get its transform and CRS.
+    geotiff_path = os.path.join(output_dir, 'S2_Composite_Filtered_8bit.tif')
+    with rasterio.open(geotiff_path) as src:
+        orig_transform = src.transform
+        src_crs = src.crs
+        pixel_width = orig_transform.a   # pixel width in map units
+        pixel_height = orig_transform.e   # pixel height (often negative)
+    
+    # New pixel size is the step size times the original pixel size.
+    new_pixel_width = step_size * pixel_width
+    new_pixel_height = step_size * pixel_height
+    
+    # New origin so that the center of the first grid cell is at (block_size/2, block_size/2)
+    new_origin_x = orig_transform.c + (block_size / 2) * pixel_width
+    new_origin_y = orig_transform.f + (block_size / 2) * pixel_height
+    
+    new_transform = Affine(new_pixel_width, orig_transform.b, new_origin_x,
+                           orig_transform.d, new_pixel_height, new_origin_y)
+    
+    # Use an explicit nodata value.
+    nodata_value = -9999
+    
+    # Extract sorted time steps from one sample DataFrame.
+    sample_key = next(iter(velocity_estimates))
+    time_steps = np.sort(velocity_estimates[sample_key]['formatted_date'].unique())
+    num_bands = len(time_steps)
+    
+    # Prepare a 3D array for all bands: (num_bands, grid_height, grid_width)
+    out_array = np.full((num_bands, grid_height, grid_width), nodata_value, dtype=np.float32)
+    
+    # For each time step (each band), fill the grid.
+    for band_idx, t in enumerate(time_steps):
+        # Loop over each chip.
+        for coord, df in velocity_estimates.items():
+            # 'coord' is assumed to be (x, y) in original image pixel space.
+            # Filter the DataFrame for the current time step.
+            row_for_date = df[df['formatted_date'] == t]
+            if row_for_date.empty:
+                continue
+            # Compute magnitude.
+            u_val = row_for_date.iloc[0]['u_velocity']
+            v_val = row_for_date.iloc[0]['v_velocity']
+            magnitude_value = np.hypot(u_val, v_val)
+            
+            # Map original pixel coordinate to grid indices.
+            x, y = coord
+            grid_x = int((x - (block_size / 2)) // step_size)
+            grid_y = int((y - (block_size / 2)) // step_size)
+            
+            # Check bounds.
+            if 0 <= grid_x < grid_width and 0 <= grid_y < grid_height:
+                out_array[band_idx, grid_y, grid_x] = magnitude_value
+    
+    # Define the full path for the output file.
+    output_filepath = os.path.join(output_dir, output_filename)
+    
+    # Write the multi-band GeoTIFF.
+    with rasterio.open(
+        output_filepath,
+        "w",
+        driver="GTiff",
+        height=grid_height,
+        width=grid_width,
+        count=num_bands,
+        dtype=out_array.dtype,
+        crs=src_crs,
+        transform=new_transform,
+        nodata=nodata_value,
+    ) as dst:
+        dst.write(out_array)
+        # Optionally, set band descriptions to the time steps.
+        for band_idx, t in enumerate(time_steps, start=1):
+            dst.set_band_description(band_idx, str(t))
+    
+    print(f"Written multi-band raster with {num_bands} bands to {output_filepath}")
+    return output_filepath
