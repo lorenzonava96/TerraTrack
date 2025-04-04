@@ -69,8 +69,6 @@ def compute_inverse_velocity_failure_dates(csv_path, n_points_for_fit_list=[5]):
              'pid': the PID,
              'failure_dates': a dictionary mapping each n_points value to the estimated failure date.
     """
-    import pandas as pd
-    import numpy as np
     
     df = pd.read_csv(csv_path)
     
@@ -111,7 +109,6 @@ def compute_inverse_velocity_failure_dates(csv_path, n_points_for_fit_list=[5]):
         failure_dates.append({'pid': pid, 'failure_dates': failure_dict})
     
     return failure_dates
-
 
 def failure_date_statistics(failure_dates_list):
     """
@@ -171,8 +168,6 @@ def plot_failure_distribution(month_counts):
     Returns:
       None. Displays the plot.
     """
-    # Use a clean style for publication-quality figures.
-    plt.style.use('seaborn-whitegrid')
     
     # Convert the index to string labels for the x-axis.
     x_labels = month_counts.index.astype(str)
