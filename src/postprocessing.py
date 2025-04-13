@@ -87,7 +87,6 @@ def calculate_median_displacement(displacement_data, pixel_size, min_displacemen
     - median_magnitude: Array of displacement magnitudes.
     - median_angles: Array of displacement angles (radians).
     """
-    import numpy as np
 
     median_feature_points, median_u, median_v, median_magnitude, median_angles = [], [], [], [], []
 
@@ -818,3 +817,90 @@ def create_multiband_magnitude_tif(velocity_estimates, study_area_image, output_
     
     print(f"Written multi-band raster with {num_bands} bands to {output_filepath}")
     return output_filepath
+
+def create_gif_with_background_and_colorbar(
+    tif_path,
+    study_area_image,
+    output_gif,
+    duration=1.0,
+    cmap="viridis",
+    alpha=0.6,
+    velocity_estimates=None
+):
+    """
+    Create a GIF from a multi-band GeoTIFF where each band is overlaid on the 
+    study_area_image as background. Only magnitude values ≥ 0.2 are shown; values
+    below 0.2 are fully transparent. A colorbar (ranging from 0 to the overall maximum 
+    magnitude) is added on the side. If velocity_estimates is provided, it will use 
+    the date strings from the time series instead of band numbers for titles.
+    
+    Parameters:
+      tif_path (str): Path to the multi-band GeoTIFF (e.g., f"{output_dir}_magnitude_multiband.tif").
+      study_area_image (np.ndarray): Background image array. Its resolution should match the composite.
+      output_gif (str): Path where the output GIF will be saved.
+      duration (float): Duration (in seconds) for each frame in the GIF.
+      cmap (str): Colormap to use for the magnitude overlay.
+      alpha (float): Transparency for the overlay (applied to visible values).
+      velocity_estimates (dict or None): Optional. Dictionary of DataFrames with a 'date' column. Used to extract dates.
+    """
+    # Extract date labels from velocity_estimates if available
+    if velocity_estimates:
+        example_df = next(iter(velocity_estimates.values()))
+        band_dates = example_df['date'].dt.strftime('%b %Y').tolist()
+    else:
+        band_dates = None
+
+    # First, compute the overall maximum value across all bands (ignoring nodata and zeros).
+    with rasterio.open(tif_path) as src:
+        num_bands = src.count
+        nodata = src.nodata
+        overall_max = 0
+        for band in range(2, num_bands + 1):
+            band_data = src.read(band)
+            valid_data = band_data[(band_data != nodata) & (band_data != 0)]
+            if valid_data.size > 0:
+                current_max = valid_data.max()
+                overall_max = max(overall_max, current_max)
+    
+    print(f"Overall maximum magnitude (ignoring zeros and nodata): {overall_max}")
+    
+    frames = []
+    with rasterio.open(tif_path) as src:
+        num_bands = src.count
+        print(f"Found {num_bands} bands in {tif_path}.")
+        for band in range(2, num_bands + 1):
+            band_data = src.read(band)
+            masked_data = np.ma.masked_less(band_data, 0.2)
+            
+            cmap_instance = plt.get_cmap(cmap).copy()
+            cmap_instance.set_bad(color=(0, 0, 0, 0))
+            
+            transform = src.transform
+            height, width = band_data.shape
+            extent = [transform[2], transform[2] + transform[0] * width,
+                      transform[5] + transform[4] * height, transform[5]]
+
+            fig, ax = plt.subplots(figsize=(8, 6))
+            ax.imshow(study_area_image, cmap="gray", extent=extent)
+            im = ax.imshow(masked_data, cmap=cmap_instance, vmin=0.2, vmax=overall_max, alpha=alpha, extent=extent)
+            ax.axis("off")
+
+            # Set title based on band_dates if available
+            if band_dates and (band - 2) < len(band_dates):
+                ax.set_title(band_dates[band - 2], fontsize=14)
+            else:
+                ax.set_title(f"Band {band}", fontsize=14)
+
+            cbar = fig.colorbar(im, ax=ax, fraction=0.046, pad=0.04)
+            cbar.set_label("Magnitude", rotation=270, labelpad=15)
+
+            buf = io.BytesIO()
+            plt.savefig(buf, format="png", bbox_inches="tight", pad_inches=0)
+            plt.close(fig)
+            buf.seek(0)
+
+            img = imageio.imread(buf)
+            frames.append(img)
+    
+    imageio.mimsave(output_gif, frames, duration=duration)
+    print(f"GIF saved to {output_gif}")
