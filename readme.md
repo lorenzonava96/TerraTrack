@@ -48,8 +48,6 @@ TerraTrack/
 ├── notebooks/           # Main notebook(s)
 ├── src/                 # Python modules (optional)
 ├── figures/             # Logo, plots, visuals
-├── data/                # Sample input/output data (optional)
-├── examples/            # Sample results (optional)
 ├── requirements.txt     # Dependencies for local + Colab
 ├── LICENSE
 └── README.md
