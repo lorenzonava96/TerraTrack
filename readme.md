@@ -28,7 +28,11 @@ jupyter notebook notebooks/TerraTrack_v1.0.ipynb
 
 ---
 
-## Features
+## Workflow
+
+<p align="left">
+  <img src="figures/Workflow2.png" alt="Workflow" width="2000"/>
+</p>
 
 - Automated Sentinel-2 image acquisition via Earth Engine API
 - Multiple feature tracking methods:
