@@ -10,6 +10,7 @@ import cv2
 from skimage.morphology import thin, binary_closing, binary_dilation
 import os
 from rasterio.transform import Affine
+import io
 
 def resample_morpho_to_match(orig_shape, morpho_path, output_path):
     """
