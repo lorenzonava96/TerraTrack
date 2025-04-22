@@ -871,7 +871,7 @@ def create_gif_with_background_and_colorbar(
         print(f"Found {num_bands} bands in {tif_path}.")
         for band in range(2, num_bands + 1):
             band_data = src.read(band)
-            masked_data = np.ma.masked_less(band_data, 0.2)
+            masked_data = np.ma.masked_less(band_data, 0)
             
             cmap_instance = plt.get_cmap(cmap).copy()
             cmap_instance.set_bad(color=(0, 0, 0, 0))
