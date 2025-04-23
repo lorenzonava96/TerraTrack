@@ -11,6 +11,7 @@ from skimage.morphology import thin, binary_closing, binary_dilation
 import os
 from rasterio.transform import Affine
 import io
+import imageio.v2 as imageio
 
 def resample_morpho_to_match(orig_shape, morpho_path, output_path):
     """
