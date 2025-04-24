@@ -2,7 +2,7 @@ import os
 import h5py
 import numpy as np
 
-def handle_predictions_upscaled(
+def handle_predictions(
     output_dir, acq_id=None, results=None, separation=None, orig=None, dat1=None, dat2=None, save=True, load=True
 ):
     """
