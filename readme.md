@@ -50,9 +50,9 @@ cd TerraTrack
 
 TerraTrack/
 ├── notebooks/           # Main notebook(s)
-├── src/                 # Python modules (optional)
-├── figures/             # Logo, plots, visuals
-├── requirements.txt     # Dependencies for local + Colab
+├── src/                 # Helpers
+├── figures/             # Logo, visuals
+├── requirements.txt     # Dependencies for Colab
 ├── LICENSE
 └── README.md
 
