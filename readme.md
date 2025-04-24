@@ -23,7 +23,7 @@ Click the badge below to launch:
 ```bash
 git clone https://github.com/lorenzonava96/TerraTrack.git
 cd TerraTrack
-jupyter notebook notebooks/TerraTrack_v1.0.ipynb
+...... in progresssssss .........
 ```
 
 ---
