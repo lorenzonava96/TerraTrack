@@ -166,233 +166,89 @@ def dense_optical_flow_displacement(img1, img2):
     return feature_points, u, v, None, None
 
 # ------------------------------
-# Subpixel Method Implementations
-# Each returns (dx, dy[, pkr])
-# All methods take signature: (block, i, j)
+# Helper Function for Subpixel Refinement
 # ------------------------------
 
-def _parabolic_1d(block, i, j):
-    """1D three-point quadratic interpolation in x and y axes."""
-    row, col = block[i, :], block[:, j]
-    def interp(vals, idx):
-        if idx <= 0 or idx >= len(vals) - 1:
-            return idx
-        l, c, r = vals[idx-1], vals[idx], vals[idx+1]
-        return idx + 0.5 * (l - r) / (l - 2*c + r)
-    dx = interp(row, j) - block.shape[1] / 2
-    dy = interp(col, i) - block.shape[0] / 2
-    return dx, dy
-
-
-def _center_of_mass_2d(block, i, j):
-    """2D centroid of a local 3x3 window using scipy.ndimage.center_of_mass."""
-    half = 1  # window size=3
-    y0, y1 = max(0, i-half), min(block.shape[0], i+half+1)
-    x0, x1 = max(0, j-half), min(block.shape[1], j+half+1)
-    window = block[y0:y1, x0:x1]
-    cy, cx = center_of_mass(window)
-    dx = (x0 + cx) - block.shape[1] / 2
-    dy = (y0 + cy) - block.shape[0] / 2
-    return dx, dy
-
-def _centroid_1d(block, i, j):
-    """
-    1D intensity‑weighted centroid over 3 points in x and y,
-    returning full displacement (integer + fractional).
-    Falls back to parabolic at borders.
-    """
-    bs_y, bs_x = block.shape
-    center_x = bs_x // 2
-    center_y = bs_y // 2
-
-    # desired slice windows
-    x0, x1 = j - 1, j + 2
-    y0, y1 = i - 1, i + 2
-
-    # clamp to block boundaries
-    x0c, x1c = max(0, x0), min(bs_x, x1)
-    y0c, y1c = max(0, y0), min(bs_y, y1)
-
-    line_x = block[i, x0c:x1c]
-    line_y = block[y0c:y1c, j]
-    # if we don't have a full 3‑point neighborhood, fallback
-    if line_x.size < 3 or line_y.size < 3:
-        return _parabolic_1d(block, i, j)
-
-    eps = 1e-10
-    # fractional centroid in x
-    frac_dx = (line_x[2] - line_x[0]) / (line_x.sum() + eps)
-    # fractional centroid in y
-    frac_dy = (line_y[2] - line_y[0]) / (line_y.sum() + eps)
-
-    # integer shift + fractional
-    full_dx = (j - center_x) + frac_dx
-    full_dy = (i - center_y) + frac_dy
-    return full_dx, full_dy
-
-def _os_n(block, i, j, window_size):
-    """Ordinary sampling centroid over NxN window, returns (dx, dy, pkr)."""
-    half = window_size // 2
-    # determine window bounds within block
-    y0 = max(0, i - half)
-    y1 = min(block.shape[0], i + half + 1)
-    x0 = max(0, j - half)
-    x1 = min(block.shape[1], j + half + 1)
-    # extract patch
-    patch = block[y0:y1, x0:x1]
-    h, w = patch.shape
-    flat = patch.ravel()
-    # compute center index within patch
-    center_y = i - y0
-    center_x = j - x0
-    center_idx = center_y * w + center_x
-    center_val = flat[center_idx]
-    # compute PKR
-    non_center = np.delete(flat, center_idx)
-    nonmax_mean = non_center.mean()
-    pkr = center_val / (abs(nonmax_mean) + 1e-10)
-    # form non-negative weights
-    cc = np.maximum(patch - nonmax_mean, 0)
-    total = cc.sum()
-    weights = cc / (total + 1e-10)
-    # construct coordinate grids relative to block center
-    x_coords = np.arange(x0, x1) - (block.shape[1] / 2)
-    y_coords = np.arange(y0, y1) - (block.shape[0] / 2)
-    xv, yv = np.meshgrid(x_coords, y_coords, indexing='xy')
-    dx = np.sum(weights * xv)
-    dy = np.sum(weights * yv)
-    return dx, dy, pkr
-
-
-def _ipg_2d(block, i, j):
-    """
-    Implicit parabolic (Gauss–Newton) subpixel over a 3×3 window.
-    Returns full displacement (dx, dy) and a local PKR.
-    Falls back to parabolic when on the block border.
-    """
-    bs_y, bs_x = block.shape
-    center_x = bs_x // 2
-    center_y = bs_y // 2
-
-    # Need a full 3×3 neighborhood
-    if i < 1 or i > bs_y - 2 or j < 1 or j > bs_x - 2:
-        # fallback to your parabolic 1D over row/col
-        dx, dy = _parabolic_1d(block, i, j)
-        return dx, dy, 1.0
-
-    # extract 3×3 patch
-    cc = block[i-1:i+2, j-1:j+2]
-    center_val = cc[1,1]
-
-    # build Hessian and gradient
-    Hxx = cc[1,2] - 2*center_val + cc[1,0]
-    Hyy = cc[2,1] - 2*center_val + cc[0,1]
-    Hxy = (cc[2,2] - cc[0,2] - cc[2,0] + cc[0,0]) * 0.25
-    gx  = (cc[1,2] - cc[1,0]) * 0.5
-    gy  = (cc[2,1] - cc[0,1]) * 0.5
-
-    H = np.array([[Hxx, Hxy],
-                  [Hxy, Hyy]], dtype=float)
-    g = np.array([gx, gy], dtype=float)
-
-    # solve for fractional shift
-    try:
-        delta = np.linalg.solve(H, g)
-    except np.linalg.LinAlgError:
-        delta = np.zeros(2, dtype=float)
-
-    # compute PKR from the 3×3 patch
-    flat = cc.ravel()
-    non_center = np.delete(flat, 4)
-    pkr = center_val / (np.abs(non_center.mean()) + 1e-10)
-
-    # integer + fractional
-    full_dx = (j - center_x) + delta[0]
-    full_dy = (i - center_y) + delta[1]
-
-    return full_dx, full_dy, pkr
+def parabolic_interpolation(values, peak_index):
+    """Parabolic interpolation for subpixel refinement."""
+    if peak_index <= 0 or peak_index >= len(values) - 1:
+        return peak_index  # No interpolation at edges
+    left = values[peak_index - 1]
+    center = values[peak_index]
+    right = values[peak_index + 1]
+    return peak_index + 0.5 * (left - right) / (left - 2 * center + right)
 
 # ------------------------------
-# Registry and FFT-NCC Wrapper
+# Batch FFT-NCC Matching Function
 # ------------------------------
-
-METHOD_REGISTRY = {
-    'parabolic':      _parabolic_1d,
-    'center_of_mass': _center_of_mass_2d,
-    'centroid':       _centroid_1d,
-    # 'gaussian':       _gaussian_1d,
-    'os3':            lambda b,i,j: _os_n(b,i,j,3),
-    'os5':            lambda b,i,j: _os_n(b,i,j,5),
-    'os7':            lambda b,i,j: _os_n(b,i,j,7),
-    'ipg':            _ipg_2d,
-}
-
-def batch_fft_ncc(blocks1, blocks2, subpixel_method='ensemble'):
+def batch_fft_ncc(blocks1, blocks2, subpixel_method="parabolic"):
     """
-    Compute FFT-based cross-correlation and refine peak via one method or ensemble.
-
+    Process a batch of blocks using FFT-based normalized cross-correlation.
+    
     Parameters:
-      blocks1, blocks2 : (N, bs, bs) arrays
-      subpixel_method : one of METHOD_REGISTRY keys or 'ensemble'
-
+      blocks1 : ndarray of shape (N, block_size, block_size)
+      blocks2 : ndarray of shape (N, block_size, block_size)
+      subpixel_method : str, one of "center_of_mass", "quadratic", "parabolic"
+      
     Returns:
-      dx, dy, pkr, snr : each array of shape (N,)
+      dx, dy : ndarrays (N,) of subpixel displacements (the refined offsets)
+      pkr, snr : ndarrays (N,) of the peak-to-peak ratios and signal-to-noise ratios
     """
     N, bs, _ = blocks1.shape
-    # FFT cross-correlation
-    F1 = fft2(blocks1)
-    F2 = fft2(blocks2)
-    cps = F1 * np.conj(F2)
-    cc_maps = np.fft.fftshift(ifft2(cps / (np.abs(cps) + 1e-10)).real,
-                               axes=(1,2))
-    # locate integer peaks
-    flat = cc_maps.reshape(N, -1)
-    idx = np.argmax(flat, axis=1)
-    is_, js = divmod(idx, bs)
-    max_vals = cc_maps[np.arange(N), is_, js]
-    mean_vals = np.mean(np.abs(cc_maps), axis=(1,2))
-    snr = max_vals / (mean_vals + 1e-10)
-
-    # choose methods
-    if subpixel_method == 'ensemble':
-        methods = list(METHOD_REGISTRY.keys())
-        ensemble = True
-    else:
-        if subpixel_method not in METHOD_REGISTRY:
-            raise ValueError(f"Unknown method '{subpixel_method}'")
-        methods = [subpixel_method]
-        ensemble = False
-
-    M = len(methods)
-    dx_all = np.zeros((M, N))
-    dy_all = np.zeros((M, N))
-    pkr_all= np.zeros((M, N))
-
-    for m_idx, m in enumerate(methods):
-        func = METHOD_REGISTRY[m]
-        for k in range(N):
-            block = cc_maps[k]
-            i, j = is_[k], js[k]
-            out = func(block, i, j)
-            if len(out) == 3:
-                dx_all[m_idx,k], dy_all[m_idx,k], pkr_all[m_idx,k] = out
-            else:
-                dx_all[m_idx,k], dy_all[m_idx,k] = out
-                # fallback PKR from integer peak contrast
-                pkr_all[m_idx,k] = max_vals[k] / (
-                    np.mean(np.delete(block.ravel(), idx[k])) + 1e-10)
-
-    # fuse if ensemble
-    if ensemble and M > 1:
-        w = pkr_all / (pkr_all.sum(axis=0) + 1e-10)
-        dx = (dx_all * w).sum(axis=0)
-        dy = (dy_all * w).sum(axis=0)
-        pkr= (pkr_all * w).sum(axis=0)
-    else:
-        dx = dx_all[0]
-        dy = dy_all[0]
-        pkr= pkr_all[0]
-
+    # Compute FFT for all blocks (vectorized over N)
+    FFT1 = fft2(blocks1)
+    FFT2 = fft2(blocks2)
+    cross_power = FFT1 * np.conj(FFT2)
+    cross_corr = ifft2(cross_power / (np.abs(cross_power) + 1e-10)).real
+    # Apply fftshift along last two axes for each block
+    cross_corr = np.fft.fftshift(cross_corr, axes=(1, 2))
+    
+    # For each block, find the index of the maximum value
+    flattened = cross_corr.reshape(N, -1)
+    peak_flat_idx = np.argmax(flattened, axis=1)
+    i_indices = peak_flat_idx // bs
+    j_indices = peak_flat_idx % bs
+    max_corr = cross_corr[np.arange(N), i_indices, j_indices]
+    mean_corr = np.mean(np.abs(cross_corr), axis=(1,2))
+    snr = max_corr / (mean_corr + 1e-10)
+    
+    # For each block, determine the second highest peak (for PKR) and perform subpixel refinement
+    pkr = np.zeros(N)
+    dx = np.zeros(N)
+    dy = np.zeros(N)
+    buffer_size = 1
+    for k in range(N):
+        block = cross_corr[k]
+        i = i_indices[k]
+        j = j_indices[k]
+        # Mask out a small region around the primary peak
+        temp = block.copy()
+        i_min = max(0, i - buffer_size)
+        i_max = min(bs, i + buffer_size + 1)
+        j_min = max(0, j - buffer_size)
+        j_max = min(bs, j + buffer_size + 1)
+        temp[i_min:i_max, j_min:j_max] = -np.inf
+        second_peak = np.max(temp)
+        pkr[k] = max_corr[k] / (second_peak + 1e-10)
+        
+        # Subpixel refinement per block
+        if subpixel_method == "center_of_mass":
+            window_size = 3
+            x_min = max(0, j - window_size // 2)
+            x_max = min(bs, j + window_size // 2 + 1)
+            y_min = max(0, i - window_size // 2)
+            y_max = min(bs, i + window_size // 2 + 1)
+            local_window = block[y_min:y_max, x_min:x_max]
+            refined_y, refined_x = center_of_mass(local_window)
+            # Convert from local window to block-centered coordinates:
+            dx[k] = refined_x + x_min - bs // 2
+            dy[k] = refined_y + y_min - bs // 2
+        elif subpixel_method == "parabolic":
+            dx[k] = parabolic_interpolation(block[i, :], j)
+            dy[k] = parabolic_interpolation(block[:, j], i)
+        else:
+            raise ValueError("Invalid subpixel_method. Choose from 'center_of_mass', 'quadratic', or 'parabolic'.")
+    
     return dx, dy, pkr, snr
 
 # ------------------------------
@@ -676,7 +532,7 @@ def filter_displacements(
 
     # Handle empty results
     if not np.any(valid_mask):
-        # print("No valid displacements after filtering.")
+        print("No valid displacements after filtering.")
         return np.array([]), np.array([]), np.empty((0, 2))
 
     # Return filtered results
@@ -685,21 +541,6 @@ def filter_displacements(
     filtered_feature_points = feature_points[valid_mask]
 
     return u_filtered, v_filtered, filtered_feature_points
-
-def plot_displacement_field(u, v, feature_points, img1, num_arrows=10, arrow_scale=10):
-    plt.figure(figsize=(12, 12))
-    plt.imshow(img1, cmap='gray')
-    magnitudes = np.sqrt(u ** 2 + v ** 2)
-    quiver = plt.quiver(
-        feature_points[:, 0], feature_points[:, 1], u, v, magnitudes,
-        angles='xy', scale_units='xy', scale=arrow_scale, width=0.0025, headwidth=3, cmap='jet'
-    )
-    cbar = plt.colorbar(quiver, label='Displacement Magnitude (pixels/frame)', fraction=0.026, pad=0.04)
-    cbar.ax.tick_params(labelsize=10)
-    plt.title('Displacement Field at Feature Points', fontsize=16)
-    plt.xlabel('X Coordinate', fontsize=12)
-    plt.ylabel('Y Coordinate', fontsize=12)
-    plt.show()
 
 def process_image_pairs(dat1, dat2, datax, preprocessed_stack, filter_params, zero_mask=None,
                         method='block_matching', block_size=32, overlap=0.8, 
