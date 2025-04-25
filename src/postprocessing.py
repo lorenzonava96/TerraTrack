@@ -884,7 +884,7 @@ def create_gif_with_background_and_colorbar(
 
             fig, ax = plt.subplots(figsize=(8, 6))
             ax.imshow(study_area_image, cmap="gray", extent=extent)
-            im = ax.imshow(masked_data, cmap=cmap_instance, vmin=0.2, vmax=overall_max, alpha=alpha, extent=extent)
+            im = ax.imshow(masked_data, cmap=cmap_instance, vmin=0, vmax=overall_max, alpha=alpha, extent=extent)
             ax.axis("off")
 
             # Set title based on band_dates if available
