@@ -10,6 +10,7 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 import time
 import os
 
+
 # =============================================================================
 # Displacement Analysis Function
 # =============================================================================
@@ -118,7 +119,7 @@ def displacement_analysis(
 
     # Step 3: Optionally plot the displacement field.
     if plot and feature_points.size > 0:
-        plot_displacement_field(u, v, feature_points, img1, arrow_scale=arrow_scale)
+        plot_displacement_field_a(u, v, feature_points, img1, arrow_scale=arrow_scale)
 
     return u, v, feature_points, pkrs, snrs
 
@@ -644,3 +645,18 @@ def process_image_pairs(dat1, dat2, datax, preprocessed_stack, filter_params, ze
     print(f"\nProcessed {total_pairs} pairs in {elapsed_time:.2f} seconds.")
 
     return all_results
+
+def plot_displacement_field_a(u, v, feature_points, img1, num_arrows=10, arrow_scale=10):
+    plt.figure(figsize=(12, 12))
+    plt.imshow(img1, cmap='gray')
+    magnitudes = np.sqrt(u ** 2 + v ** 2)
+    quiver = plt.quiver(
+        feature_points[:, 0], feature_points[:, 1], u, v, magnitudes,
+        angles='xy', scale_units='xy', scale=arrow_scale, width=0.0025, headwidth=3, cmap='jet'
+    )
+    cbar = plt.colorbar(quiver, label='Displacement Magnitude (pixels/frame)', fraction=0.026, pad=0.04)
+    cbar.ax.tick_params(labelsize=10)
+    plt.title('Displacement Field at Feature Points', fontsize=16)
+    plt.xlabel('X Coordinate', fontsize=12)
+    plt.ylabel('Y Coordinate', fontsize=12)
+    plt.show()
