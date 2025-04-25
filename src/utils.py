@@ -1,129 +1,92 @@
 import os
-import h5py
 import numpy as np
 
 def handle_predictions(
-    output_dir,
-    method,
-    match_func,
-    results=None,
-    separation=None,
-    orig=None,
-    dat1=None,
-    dat2=None,
-    load=True
+    output_dir, method, match_func, results=None, separation=None, orig=None, dat1=None, dat2=None, save=True, load=True
 ):
     """
-    Handles saving/loading prediction results using HDF5 to reduce peak RAM usage.
-    If loading succeeds, returns data straight from the file; otherwise builds from
-    workspace variables and writes them into an .h5.
+    Handles saving or loading prediction results based on the flags. If loading fails,
+    data is created from the provided results and workspace variables and then saved.
 
     Parameters:
-        output_dir (str): Directory where results are saved/loaded.
-        method (str): Name of the method (e.g., 'block_matching').
-        match_func (str): Name of the matching function.
-        results (list): List of dicts with keys 'u','v','feature_points','pkrs','snrs'.
-        separation (np.ndarray): Separation vector.
-        orig (np.ndarray): Original study area image (3D or 2D stack).
-        dat1 (list of str): Start-date strings.
-        dat2 (list of str): End-date strings.
-        load (bool): If True, try to load before regenerating.
+        output_dir (str): Directory where results are saved or loaded from.
+        method (str): Name of the method used (e.g., block_matching).
+        match_func (str): Name of the matching function used.
+        results (list): List of dictionaries containing prediction results.
+        separation (np.array): Separation vector.
+        orig (np.array): Original study area image.
+        dat1 (list): List of start dates.
+        dat2 (list): List of end dates.
+        save (bool): Flag to enable saving (ignored; saving happens in any case).
+        load (bool): Flag to enable loading.
 
     Returns:
-        dict: {
-            "all_u": list of np.ndarray,
-            "all_v": list of np.ndarray,
-            "all_feature_points": list of np.ndarray,
-            "all_pkrs": list of np.ndarray,
-            "all_snrs": list of np.ndarray,
-            "separation": np.ndarray,
-            "study_area_image": np.ndarray,
-            "dat1": list of str,
-            "dat2": list of str
-        }
+        dict: Prediction data loaded from the file or created from the results.
     """
-    os.makedirs(output_dir, exist_ok=True)
-    h5_path = os.path.join(
-        output_dir,
-        f"{output_dir}_displacement_results_{method}_{match_func}.h5"
-    )
+    file_path = os.path.join(output_dir, f"{output_dir}_displacement_results_{method}_{match_func}.npz")
 
-    if load and os.path.exists(h5_path):
+    if load:
         try:
-            with h5py.File(h5_path, 'r') as f:
-                def _read_list(group_name):
-                    grp = f[group_name]
-                    # assume keys are '0','1',... as strings
-                    return [grp[k][()] for k in sorted(grp, key=lambda x: int(x))]
+            # Attempt to load the data
+            loaded_data = np.load(file_path, allow_pickle=True)
+            print(f"Loaded data successfully from {file_path}.")
+            return {
+                "all_u": list(loaded_data['all_u']),
+                "all_v": list(loaded_data['all_v']),
+                "all_feature_points": list(loaded_data['all_feature_points']),
+                "all_pkrs": list(loaded_data['all_pkrs']),
+                "all_snrs": list(loaded_data['all_snrs']),
+                "separation": loaded_data['separation'],
+                "study_area_image": loaded_data['study_area_image'],
+                "dat1": loaded_data['dat1'],
+                "dat2": loaded_data['dat2']
+            }
+        except FileNotFoundError:
+            print(f"File not found: {file_path}. Switching to data creation from workspace.")
 
-                data = {
-                    "all_u": _read_list('all_u'),
-                    "all_v": _read_list('all_v'),
-                    "all_feature_points": _read_list('all_feature_points'),
-                    "all_pkrs": _read_list('all_pkrs'),
-                    "all_snrs": _read_list('all_snrs'),
-                    "separation": f['separation'][()],
-                    "study_area_image": f['study_area_image'][()],
-                    "dat1": [d.decode('utf-8') for d in f['dat1'][()]],
-                    "dat2": [d.decode('utf-8') for d in f['dat2'][()]]
-                }
-            print(f"Loaded data from {h5_path}")
-            return data
-        except Exception as e:
-            print(f"Failed to load HDF5 ({e}), will regenerate.")
-
-    # Build data from workspace variables
+    # Generate data from workspace variables without checking for missing ones.
     print("Generating data from workspace variables...")
 
-    all_u = [res['u'] for res in results]
-    all_v = [res['v'] for res in results]
-    all_feature_points = [res['feature_points'] for res in results]
-    all_pkrs = [res['pkrs'] for res in results]
-    all_snrs = [res['snrs'] for res in results]
+    # Initialize lists to store results
+    all_u, all_v, all_feature_points = [], [], []
+    all_pkrs, all_snrs = [], []
 
-    # Flatten study_area_image to 2D if it's a stack
-    study_img = orig[..., 0] if orig.ndim == 3 else orig
+    # Process the results to populate data
+    for result in results:
+        all_u.append(result['u'])
+        all_v.append(result['v'])
+        all_feature_points.append(result['feature_points'])
+        all_pkrs.append(result['pkrs'])
+        all_snrs.append(result['snrs'])
 
-    # Write out to HDF5
-    with h5py.File(h5_path, 'w') as f:
-        # helper to write a list of arrays into a subgroup
-        def _write_list(name, lst):
-            grp = f.create_group(name)
-            for idx, arr in enumerate(lst):
-                grp.create_dataset(
-                    str(idx), data=arr,
-                    compression='gzip', chunks=True
-                )
-
-        _write_list('all_u', all_u)
-        _write_list('all_v', all_v)
-        _write_list('all_feature_points', all_feature_points)
-        _write_list('all_pkrs', all_pkrs)
-        _write_list('all_snrs', all_snrs)
-
-        f.create_dataset(
-            'separation', data=separation,
-            compression='gzip', chunks=True
-        )
-        f.create_dataset(
-            'study_area_image', data=study_img,
-            compression='gzip', chunks=True
-        )
-
-        # store dat1/dat2 as UTF-8 variable-length strings
-        str_dt = h5py.string_dtype(encoding='utf-8')
-        f.create_dataset('dat1', data=np.array(dat1, dtype=str_dt), dtype=str_dt)
-        f.create_dataset('dat2', data=np.array(dat2, dtype=str_dt), dtype=str_dt)
-
-    print(f"Saved HDF5 to {h5_path}")
-    return {
-        "all_u": all_u,
-        "all_v": all_v,
-        "all_feature_points": all_feature_points,
-        "all_pkrs": all_pkrs,
-        "all_snrs": all_snrs,
+    data = {
+        "all_u": np.array(all_u, dtype=object),
+        "all_v": np.array(all_v, dtype=object),
+        "all_feature_points": np.array(all_feature_points, dtype=object),
+        "all_pkrs": np.array(all_pkrs, dtype=object),
+        "all_snrs": np.array(all_snrs, dtype=object),
         "separation": separation,
-        "study_area_image": study_img,
+        "study_area_image": orig[..., 0],
         "dat1": dat1,
         "dat2": dat2
     }
+
+    # Ensure the output directory exists and save results to a compressed NumPy file.
+    os.makedirs(output_dir, exist_ok=True)
+    np.savez_compressed(
+        file_path,
+        all_u=data["all_u"],
+        all_v=data["all_v"],
+        all_feature_points=data["all_feature_points"],
+        all_pkrs=data["all_pkrs"],
+        all_snrs=data["all_snrs"],
+        separation=data["separation"],
+        study_area_image=data["study_area_image"],
+        dat1=data["dat1"],
+        dat2=data["dat2"]
+    )
+
+    print(f"Results saved in '{output_dir}' directory:")
+    print(f"- Compressed NumPy file: {file_path}")
+
+    return data
