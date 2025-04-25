@@ -327,7 +327,6 @@ METHOD_REGISTRY = {
     'ipg':            _ipg_2d,
 }
 
-
 def batch_fft_ncc(blocks1, blocks2, subpixel_method='ensemble'):
     """
     Compute FFT-based cross-correlation and refine peak via one method or ensemble.
@@ -677,7 +676,7 @@ def filter_displacements(
 
     # Handle empty results
     if not np.any(valid_mask):
-        print("No valid displacements after filtering.")
+        # print("No valid displacements after filtering.")
         return np.array([]), np.array([]), np.empty((0, 2))
 
     # Return filtered results
