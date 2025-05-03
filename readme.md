@@ -2,8 +2,6 @@
   <img src="figures/logo.png" alt="TerraTrack" width="160"/>
 </p>
 
-... fixing some bugs ...
-
 🛰️ **TerraTrack** is an open-source, cloud-based workflow for detecting and monitoring slow-moving landslides using Sentinel-2 imagery and optical feature tracking.
 
 It is fully reproducible via Google Colab and supports scalable motion analysis using multiple tracking methods, terrain filtering, and time series reconstruction.
