@@ -72,51 +72,76 @@ def accumulate_displacement(all_u, all_v, all_feature_points, separation):
             displacement_data[(x, y)]['years_diff'].append(years_diff)
     return displacement_data
 
-def calculate_median_displacement(displacement_data, pixel_size, min_displacement_threshold, max_displacement_threshold):
+def calculate_median_displacement(
+    displacement_data,
+    pixel_size,
+    slope_map=None,
+    apply_slope_correction=False
+):
     """
     Calculate median displacement vectors, their magnitude, and angle.
 
     Parameters:
-    - displacement_data: Dictionary with accumulated displacements.
-    - pixel_size: Scaling factor for displacements.
-    - min_displacement_threshold: Minimum magnitude threshold for filtering.
-    - max_displacement_threshold: Maximum magnitude threshold for filtering.
+    - displacement_data: dict
+        Dictionary with keys (x, y) and values containing 'u_values', 'v_values', 'years_diff'.
+    - pixel_size: float
+        Nominal ground resolution (e.g., meters per pixel).
+    - min_displacement_threshold: float
+        Minimum magnitude threshold to keep a displacement.
+    - max_displacement_threshold: float
+        Maximum magnitude threshold to keep a displacement.
+    - slope_map: 2D ndarray, optional
+        Map of slope angles in radians, same shape as input imagery.
+    - apply_slope_correction: bool
+        If True, displacements are corrected for slope using 1 / cos(slope_angle).
 
     Returns:
-    - median_feature_points: Array of feature points.
-    - median_u: Array of median U displacements.
-    - median_v: Array of median V displacements.
-    - median_magnitude: Array of displacement magnitudes.
-    - median_angles: Array of displacement angles (radians).
+    - median_feature_points: (N, 2) array of feature point coordinates.
+    - median_u: (N,) array of median horizontal displacements (U).
+    - median_v: (N,) array of median vertical displacements (V).
+    - median_magnitude: (N,) array of displacement magnitudes.
+    - median_angles: (N,) array of displacement angles (radians).
     """
 
-    median_feature_points, median_u, median_v, median_magnitude, median_angles = [], [], [], [], []
+    median_feature_points = []
+    median_u = []
+    median_v = []
+    median_magnitude = []
+    median_angles = []
 
     for (x, y), data in displacement_data.items():
         if len(data['u_values']) > 0 and len(data['years_diff']) > 0:
-            # Normalize each displacement by years_diff
+            # Normalize each displacement by time baseline
             normalized_u = np.array(data['u_values']) / np.array(data['years_diff'])
             normalized_v = np.array(data['v_values']) / np.array(data['years_diff'])
 
-            # Compute the median normalized velocities
+            # Compute median velocities (in px/year)
             median_u_velocity = np.nanmedian(normalized_u)
             median_v_velocity = np.nanmedian(normalized_v)
 
-            # Scale velocities to displacements using pixel_size
-            median_u_disp = median_u_velocity * pixel_size
-            median_v_disp = median_v_velocity * pixel_size
+            # Convert to ground displacement (m/year)
+            u_disp = median_u_velocity * pixel_size
+            v_disp = median_v_velocity * pixel_size
 
-            # Compute magnitude and angle
-            magnitude = np.sqrt(median_u_disp**2 + median_v_disp**2)
-            angle = np.arctan2(median_v_disp, median_u_disp)
+            if apply_slope_correction and slope_map is not None:
+                try:
+                    slope_angle = np.deg2rad(slope_map[int(y), int(x)])  # CONVERT TO RADIANS
+                    correction_factor = 1 / max(np.cos(slope_angle), 1e-3)
+                    u_disp *= correction_factor
+                    v_disp *= correction_factor
+                except IndexError:
+                    continue
 
-            # Apply magnitude filtering
-            if min_displacement_threshold <= magnitude <= max_displacement_threshold:
-                median_feature_points.append((x, y))
-                median_u.append(median_u_disp)
-                median_v.append(median_v_disp)
-                median_magnitude.append(magnitude)
-                median_angles.append(angle)
+
+            # Compute magnitude and direction
+            magnitude = np.sqrt(u_disp**2 + v_disp**2)
+            angle = np.arctan2(v_disp, u_disp)
+
+            median_feature_points.append((x, y))
+            median_u.append(u_disp)
+            median_v.append(v_disp)
+            median_magnitude.append(magnitude)
+            median_angles.append(angle)
 
     return (
         np.array(median_feature_points),
