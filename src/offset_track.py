@@ -19,7 +19,7 @@ def displacement_analysis(
     block_size=16,
     overlap=0.8,
     match_func='fft_ncc',  # For block matching: 'phase_cross_corr', 'fft_ncc', 'median_dense_optical_flow', etc.
-    subpixel_method="parabolic",  # Only used if match_func is 'fft_ncc'
+    subpixel_method="os3",  # Only used if match_func is 'fft_ncc'
     zero_mask=None,  # Optional mask for invalid areas
     filter_params=None,  # Dictionary of parameters for filter_displacements
     plot=True,  # Whether to visualize the displacement field
