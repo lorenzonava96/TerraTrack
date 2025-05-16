@@ -10,7 +10,6 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 import time
 import os
 
-
 # =============================================================================
 # Displacement Analysis Function
 # =============================================================================
@@ -171,18 +170,164 @@ def dense_optical_flow_displacement(img1, img2):
 # ------------------------------
 
 def parabolic_interpolation(values, peak_index):
-    """Parabolic interpolation for subpixel refinement."""
+    """Return subpixel offset relative to the integer peak index."""
     if peak_index <= 0 or peak_index >= len(values) - 1:
-        return peak_index  # No interpolation at edges
+        return 0.0  # No subpixel offset
     left = values[peak_index - 1]
     center = values[peak_index]
     right = values[peak_index + 1]
-    return peak_index + 0.5 * (left - right) / (left - 2 * center + right)
+    offset = 0.5 * (left - right) / (left - 2 * center + right)
+    return offset
+
+def subpixel_os_method(block, method):
+    """
+    Offset smoothing (OS) subpixel methods: os3, os5, os7.
+    Args:
+        block: 2D numpy array, correlation surface.
+        method: 'os3', 'os5', or 'os7'.
+    Returns:
+        dy, dx: subpixel displacements
+    """
+    size = int(method[2])  # Extract 3, 5, or 7
+    half = size // 2
+    if block.shape[0] < size or block.shape[1] < size:
+        return 0.0, 0.0  # fallback if too close to edge
+
+    center = block.shape[0] // 2
+    region = block[center - half:center + half + 1, center - half:center + half + 1].copy()
+    weights = region.copy()
+    non_center = np.delete(weights.flatten(), size * size // 2)
+    nonmax_mean = np.mean(non_center)
+    # peak_val = region[half, half]
+    # pkr = peak_val / (nonmax_mean + 1e-10)
+
+    weights -= nonmax_mean
+    weights[weights < 0] = 0
+    weights /= weights.sum() + 1e-10
+
+    u_grid, v_grid = np.meshgrid(np.arange(-half, half + 1), np.arange(-half, half + 1))
+    dx = np.sum(weights * u_grid)
+    dy = np.sum(weights * v_grid)
+    return dy, dx
+
+def subpixel_gaussian(block):
+    """
+    Subpixel refinement using Gaussian peak interpolation.
+    Assumes the peak follows a log-parabola (Gaussian) in both axes.
+    
+    Returns:
+        dy, dx: subpixel offsets from center.
+    """
+    center = block.shape[0] // 2
+    try:
+        # Log of intensities around the center pixel
+        L = lambda a: np.log(np.maximum(a, 1e-10))
+
+        # X direction
+        log_left = L(block[center, center - 1])
+        log_center = L(block[center, center])
+        log_right = L(block[center, center + 1])
+        denom_x = 2 * (log_left - 2 * log_center + log_right)
+        dx = (log_left - log_right) / (denom_x + 1e-10)
+
+        # Y direction
+        log_up = L(block[center - 1, center])
+        log_down = L(block[center + 1, center])
+        denom_y = 2 * (log_up - 2 * log_center + log_down)
+        dy = (log_up - log_down) / (denom_y + 1e-10)
+
+        return dy, dx
+    except Exception:
+        return 0.0, 0.0
+
+def subpixel_ipg(block):
+    """
+    IPG-style subpixel method via image gradient Hessian fitting.
+    """
+    center = block.shape[0] // 2
+    try:
+        fx = 0.5 * (block[center, center + 1] - block[center, center - 1])
+        fy = 0.5 * (block[center + 1, center] - block[center - 1, center])
+        fxx = block[center, center + 1] - 2 * block[center, center] + block[center, center - 1]
+        fyy = block[center + 1, center] - 2 * block[center, center] + block[center - 1, center]
+        fxy = 0.25 * (
+            block[center + 1, center + 1] - block[center - 1, center + 1]
+            - block[center + 1, center - 1] + block[center - 1, center - 1]
+        )
+
+        H = np.array([[fxx, fxy], [fxy, fyy]])
+        g = np.array([-fx, -fy])
+
+        # Check matrix condition to avoid instability
+        if np.linalg.cond(H) > 1e3:
+            return 0.0, 0.0
+
+        delta = np.linalg.solve(H, g)
+
+        # Optional: clip large displacements (e.g. > 2 px)
+        if np.linalg.norm(delta) > 2:
+            return 0.0, 0.0
+
+        return delta[1], delta[0]  # dy, dx
+    except Exception:
+        return 0.0, 0.0
+    
+def ensemble_subpixel_refinement(block, peak_i, peak_j, methods=["parabolic", "os3", "ipg"]):
+    """
+    Ensemble subpixel refinement using a weighted average of multiple methods.
+
+    Args:
+        block (ndarray): 2D correlation surface.
+        peak_i, peak_j (int): Peak position.
+        methods (list): List of methods to include in ensemble.
+
+    Returns:
+        dy, dx (float): Weighted subpixel offsets.
+    """
+    dxs = []
+    dys = []
+    weights = []
+
+    for method in methods:
+        if method == "parabolic":
+            dx = parabolic_interpolation(block[peak_i, :], peak_j)
+            dy = parabolic_interpolation(block[:, peak_j], peak_i)
+        elif method == "os3":
+            dy_, dx_ = subpixel_os_method(block, "os3")
+            dx = dx_
+            dy = dy_
+        elif method == "ipg":
+            dy_, dx_ = subpixel_ipg(block)
+            dx = dx_
+            dy = dy_
+        else:
+            continue  # Skip unknown methods
+
+        # Estimate PKR per method (same as main logic)
+        buffer_size = 1
+        temp = block.copy()
+        i_min = max(0, peak_i - buffer_size)
+        i_max = min(block.shape[0], peak_i + buffer_size + 1)
+        j_min = max(0, peak_j - buffer_size)
+        j_max = min(block.shape[1], peak_j + buffer_size + 1)
+        temp[i_min:i_max, j_min:j_max] = -np.inf
+        second_peak = np.max(temp)
+        pkr = block[peak_i, peak_j] / (second_peak + 1e-10)
+
+        dxs.append(dx)
+        dys.append(dy)
+        weights.append(pkr)  # or fixed weight if needed
+
+    # Combine using weighted average
+    weights = np.clip(np.array(weights), 1e-2, None)
+    dx_final = np.average(dxs, weights=weights)
+    dy_final = np.average(dys, weights=weights)
+    return dy_final, dx_final
 
 # ------------------------------
 # Batch FFT-NCC Matching Function
 # ------------------------------
-def batch_fft_ncc(blocks1, blocks2, subpixel_method="parabolic"):
+def batch_fft_ncc(blocks1, blocks2, subpixel_method="parabolic", block_size=block_size):
     """
     Process a batch of blocks using FFT-based normalized cross-correlation.
     
@@ -245,10 +390,22 @@ def batch_fft_ncc(blocks1, blocks2, subpixel_method="parabolic"):
             dx[k] = refined_x + x_min - bs // 2
             dy[k] = refined_y + y_min - bs // 2
         elif subpixel_method == "parabolic":
-            dx[k] = parabolic_interpolation(block[i, :], j)
-            dy[k] = parabolic_interpolation(block[:, j], i)
+            dx[k] = j + parabolic_interpolation(block[i, :], j) - block_size // 2
+            dy[k] = i + parabolic_interpolation(block[:, j], i) - block_size // 2
+        elif subpixel_method == "os3":
+            dy[k], dx[k] = subpixel_os_method(block, method="os3")
+        elif subpixel_method == "os5":
+            dy[k], dx[k] = subpixel_os_method(block, method="os5")
+        elif subpixel_method == "os7":
+            dy[k], dx[k] = subpixel_os_method(block, method="os7")
+        elif subpixel_method == "gaussian":
+            dy[k], dx[k] = subpixel_gaussian(block)
+        elif subpixel_method == "ipg":
+            dy[k], dx[k] = subpixel_ipg(block)
+        elif subpixel_method == "ensemble":
+            dy[k], dx[k] = ensemble_subpixel_refinement(block, i, j)
         else:
-            raise ValueError("Invalid subpixel_method. Choose from 'center_of_mass', 'quadratic', or 'parabolic'.")
+            raise ValueError("Invalid subpixel_method. Choose from 'center_of_mass', 'parabolic', 'os3', 'os5', 'os7', 'gaussian', 'ipg'.")
     
     return dx, dy, pkr, snr
 
@@ -317,7 +474,7 @@ def block_matching_vectorized(img1, img2, block_size=16, overlap=0.8,
     # Decide processing strategy based on match_func:
     if match_func == 'fft_ncc':
         # Use batch processing for fft_ncc
-        dx, dy, pkrs, snrs = batch_fft_ncc(blocks1, blocks2, subpixel_method=subpixel_method)
+        dx, dy, pkrs, snrs = batch_fft_ncc(blocks1, blocks2, subpixel_method=subpixel_method, block_size=block_size)
         # Invert displacements as in your convention
         u = -dx
         v = -dy
