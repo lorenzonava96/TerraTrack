@@ -104,7 +104,7 @@ def displacement_analysis(
             block_size=block_size,
             overlap=overlap,
             match_func=match_func,
-            subpixel_method=subpixel_method  # Only used if match_func == 'fft_ncc'
+            subpixel_method=subpixel_method  # Only used if match_func == 'ncc', 'pcc'
         )
     else:
         raise ValueError("Invalid method. Options are 'optical_flow' or 'block_matching'.")
@@ -219,35 +219,31 @@ def subpixel_os_method(block, method):
     dy = np.sum(weights * v_grid)
     return dy, dx
 
-def subpixel_gaussian(block):
+def gaussian_interpolation_1d(values, peak_index):
     """
-    Subpixel refinement using Gaussian peak interpolation.
-    Assumes the peak follows a log-parabola (Gaussian) in both axes.
-    
-    Returns:
-        dy, dx: subpixel offsets from center.
+    Gaussian subpixel interpolation with log-parabola fit.
+    Returns offset from the peak index in range [-1, +1].
     """
-    center = block.shape[0] // 2
-    try:
-        # Log of intensities around the center pixel
-        L = lambda a: np.log(np.maximum(a, 1e-10))
+    if peak_index <= 0 or peak_index >= len(values) - 1:
+        return 0.0
 
-        # X direction
-        log_left = L(block[center, center - 1])
-        log_center = L(block[center, center])
-        log_right = L(block[center, center + 1])
-        denom_x = 2 * (log_left - 2 * log_center + log_right)
-        dx = (log_left - log_right) / (denom_x + 1e-10)
+    f1 = max(values[peak_index - 1], 1e-10)
+    f2 = max(values[peak_index], 1e-10)
+    f3 = max(values[peak_index + 1], 1e-10)
 
-        # Y direction
-        log_up = L(block[center - 1, center])
-        log_down = L(block[center + 1, center])
-        denom_y = 2 * (log_up - 2 * log_center + log_down)
-        dy = (log_up - log_down) / (denom_y + 1e-10)
+    l1 = np.log(f1)
+    l2 = np.log(f2)
+    l3 = np.log(f3)
 
-        return dy, dx
-    except Exception:
-        return 0.0, 0.0
+    denom = 2 * (l1 - 2 * l2 + l3)
+    if denom == 0 or np.isnan(denom):
+        return 0.0
+
+    offset = (l1 - l3) / denom
+
+    # Optional: clamp large jumps
+    return np.clip(offset, -1.0, 1.0)
+
 
 def subpixel_ipg(block):
     """
@@ -281,7 +277,7 @@ def subpixel_ipg(block):
     except Exception:
         return 0.0, 0.0
     
-def ensemble_subpixel_refinement(block, peak_i, peak_j, methods=["parabolic", "os3", "gaussian"]):
+def ensemble_subpixel_refinement(block, peak_i, peak_j, methods=["parabolic", "os3", "os5"]):
     """
     Ensemble subpixel refinement using a weighted average of multiple methods.
 
@@ -302,13 +298,12 @@ def ensemble_subpixel_refinement(block, peak_i, peak_j, methods=["parabolic", "o
             dx = parabolic_interpolation(block[peak_i, :], peak_j)
             dy = parabolic_interpolation(block[:, peak_j], peak_i)
         elif method == "os3":
-            dy_, dx_ = subpixel_os_method(block, "os3")
-            dx = dx_
-            dy = dy_
+            dy, dx = subpixel_os_method(block, "os3")
+
         elif method == "gaussian":
-            dy_, dx_ = subpixel_gaussian(block)
-            dx = dx_
-            dy = dy_
+            dx = gaussian_interpolation_1d(block[i, :], j)
+            dy = gaussian_interpolation_1d(block[:, j], i)
+
         else:
             continue  # Skip unknown methods
 
@@ -336,7 +331,98 @@ def ensemble_subpixel_refinement(block, peak_i, peak_j, methods=["parabolic", "o
 # ------------------------------
 # Batch FFT-NCC Matching Function
 # ------------------------------
+
 def batch_fft_ncc(blocks1, blocks2, subpixel_method="parabolic", block_size=16):
+    """
+    Process a batch of blocks using FFT-based normalized cross-correlation (NCC).
+
+    Parameters:
+      blocks1 : ndarray of shape (N, block_size, block_size)
+      blocks2 : ndarray of shape (N, block_size, block_size)
+      subpixel_method : str, one of "center_of_mass", "parabolic", etc.
+
+    Returns:
+      dx, dy : ndarrays (N,) of subpixel displacements
+      pkr, snr : ndarrays (N,) of peak-to-peak ratios and signal-to-noise ratios
+    """
+    N, bs, _ = blocks1.shape
+
+    # Mean subtraction (zero-mean blocks)
+    blocks1_zm = blocks1 - np.mean(blocks1, axis=(1, 2), keepdims=True)
+    blocks2_zm = blocks2 - np.mean(blocks2, axis=(1, 2), keepdims=True)
+
+    # FFTs
+    FFT1 = fft2(blocks1_zm)
+    FFT2 = fft2(blocks2_zm)
+
+    # Compute normalized cross-correlation in frequency domain
+    numerator = FFT1 * np.conj(FFT2)
+    denominator = np.sqrt(
+        np.sum(np.abs(FFT1)**2, axis=(1, 2), keepdims=True) *
+        np.sum(np.abs(FFT2)**2, axis=(1, 2), keepdims=True)
+    ) + 1e-10
+
+    cross_corr = ifft2(numerator / denominator).real
+    cross_corr = np.fft.fftshift(cross_corr, axes=(1, 2))
+
+    # Peak finding
+    flattened = cross_corr.reshape(N, -1)
+    peak_flat_idx = np.argmax(flattened, axis=1)
+    i_indices = peak_flat_idx // bs
+    j_indices = peak_flat_idx % bs
+    max_corr = cross_corr[np.arange(N), i_indices, j_indices]
+    mean_corr = np.mean(np.abs(cross_corr), axis=(1, 2))
+    snr = max_corr / (mean_corr + 1e-10)
+
+    # Peak ratio & subpixel refinement
+    pkr = np.zeros(N)
+    dx = np.zeros(N)
+    dy = np.zeros(N)
+    buffer_size = 1
+    for k in range(N):
+        block = cross_corr[k]
+        i = i_indices[k]
+        j = j_indices[k]
+        temp = block.copy()
+        temp[max(0, i-buffer_size):min(bs, i+buffer_size+1),
+             max(0, j-buffer_size):min(bs, j+buffer_size+1)] = -np.inf
+        second_peak = np.max(temp)
+        pkr[k] = max_corr[k] / (second_peak + 1e-10)
+
+        # Subpixel refinement
+        if subpixel_method == "center_of_mass":
+            local_window = block[max(i-1,0):i+2, max(j-1,0):j+2]
+            refined_y, refined_x = center_of_mass(local_window)
+            dx[k] = refined_x + max(j-1,0) - bs // 2
+            dy[k] = refined_y + max(i-1,0) - bs // 2
+        elif subpixel_method == "parabolic":
+            dx_offset = parabolic_interpolation(block[i, :], j) if 0 < j < bs - 1 else 0.0
+            dy_offset = parabolic_interpolation(block[:, j], i) if 0 < i < bs - 1 else 0.0
+            dx[k] = j + dx_offset - block_size // 2
+            dy[k] = i + dy_offset - block_size // 2
+        elif subpixel_method == "gaussian":
+            dx[k] = gaussian_interpolation_1d(block[i, :], j)
+            dy[k] = gaussian_interpolation_1d(block[:, j], i)
+        elif subpixel_method == "os3":
+            dy[k], dx[k] = subpixel_os_method(block, method="os3")
+        elif subpixel_method == "os5":
+            dy[k], dx[k] = subpixel_os_method(block, method="os5")
+        elif subpixel_method == "os7":
+            dy[k], dx[k] = subpixel_os_method(block, method="os7")
+        elif subpixel_method == "ipg":
+            dy[k], dx[k] = subpixel_ipg(block)
+        elif subpixel_method == "ensemble":
+            dy[k], dx[k] = ensemble_subpixel_refinement(block, i, j)
+        else:
+            raise ValueError(f"Invalid subpixel method: {subpixel_method}")
+
+    return dx, dy, pkr, snr
+
+# ------------------------------
+# Batch FFT-PCC Matching Function
+# ------------------------------
+
+def batch_fft_pcc(blocks1, blocks2, subpixel_method="parabolic", block_size=16):
     """
     Process a batch of blocks using FFT-based normalized cross-correlation.
     
@@ -414,7 +500,8 @@ def batch_fft_ncc(blocks1, blocks2, subpixel_method="parabolic", block_size=16):
         elif subpixel_method == "os7":
             dy[k], dx[k] = subpixel_os_method(block, method="os7")
         elif subpixel_method == "gaussian":
-            dy[k], dx[k] = subpixel_gaussian(block)
+            dx[k] = gaussian_interpolation_1d(block[i, :], j)
+            dy[k] = gaussian_interpolation_1d(block[:, j], i)
         elif subpixel_method == "ipg":
             dy[k], dx[k] = subpixel_ipg(block)
         elif subpixel_method == "ensemble":
@@ -463,10 +550,10 @@ def block_matching_vectorized(img1, img2, block_size=16, overlap=0.8,
       block_size: Size of the blocks to compare.
       overlap: Overlap percentage between blocks (0 to 1).
       match_func: Matching function to use. Options:
-                  'phase_cross_corr', 'fft_ncc', 'median_dense_optical_flow',
+                  'phase_cross_corr', 'fft_ncc', 'fft_pcc', 'median_dense_optical_flow',
                   or a custom callable.
       subpixel_method: Subpixel refinement method ('center_of_mass', 'quadratic', 'parabolic')
-                       (only used if match_func is 'fft_ncc').
+                       (only used if match_func is 'fft_ncc' or 'fft_pcc').
 
     Returns:
       feature_points: Array of [x, y] coordinates of matched blocks.
@@ -490,6 +577,13 @@ def block_matching_vectorized(img1, img2, block_size=16, overlap=0.8,
     if match_func == 'fft_ncc':
         # Use batch processing for fft_ncc
         dx, dy, pkrs, snrs = batch_fft_ncc(blocks1, blocks2, subpixel_method=subpixel_method, block_size=block_size)
+        # Invert displacements as in your convention
+        u = -dx
+        v = -dy
+
+    elif match_func == 'fft_pcc':
+        # Use batch processing for fft_ncc
+        dx, dy, pkrs, snrs = batch_fft_pcc(blocks1, blocks2, subpixel_method=subpixel_method, block_size=block_size)
         # Invert displacements as in your convention
         u = -dx
         v = -dy
