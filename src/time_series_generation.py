@@ -550,51 +550,155 @@ def create_velocity_time_series(displacement_data, min_snr=None, min_pkr=None):
 
     return midpoint_dfs
 
-def estimate_velocity_time_series(displacement_data, method='weighted', 
-                                  months_per_bin=4, min_snr=3, min_pkr=1.3):
+import numpy as np
+import pandas as pd
+from scipy.sparse import lil_matrix
+from scipy.sparse.linalg import lsqr
+
+def estimate_velocity_least_squares(displacement_data, velocity_component='u_velocity',
+                                     min_snr=None, min_pkr=None,
+                                     weight_by=None,  # 'snr', 'pkr', or None
+                                     time_step='D',   # e.g., 'D', '7D'
+                                     months_per_bin=1):
     """
-    Estimate velocity time series from displacement data using one of two methods.
-    
-    Two methods are available:
-    
-    - 'midpoint': A simple approach that assigns each image pair's velocity to the midpoint
-      between dat1 and dat2, and then resamples these midpoint estimates into bins (e.g., monthly,
-      quarterly, etc.).
-    
-    - 'weighted': A weighted approach that distributes each image pair's velocity uniformly over every
-      day between dat1 and dat2, thereby constructing a continuous daily time series. Daily values
-      are aggregated (using the median) into bins of the user-specified length. Quality filtering based on
-      a minimum snr and a minimum pkr is applied prior to aggregation.
-    
+    Estimate daily velocity using least squares inversion, similar to InSAR network methods.
+
+    Parameters:
+      displacement_data : dict
+          Standard input dictionary per point with keys: 'dat1', 'dat2', velocity component, 'snrs', 'pkrs'.
+      velocity_component : str
+          Velocity component to estimate ('u_velocity' or 'v_velocity').
+      min_snr, min_pkr : float or None
+          Filters for quality control.
+      weight_by : str or None
+          Weight residuals by 'snr', 'pkr', or leave unweighted.
+      time_step : str
+          Time step of unknowns, e.g., 'D' for daily, '7D' for weekly.
+      months_per_bin : int
+          Resample result into N-month bins.
+
+    Returns:
+      resampled_dict : dict
+          Dictionary mapping each point to a DataFrame with resampled velocity.
+    """
+    resampled_dict = {}
+
+    for point, data in displacement_data.items():
+        # Parse and filter data
+        dat1 = pd.to_datetime(data['dat1'])
+        dat2 = pd.to_datetime(data['dat2'])
+        velocities = data[velocity_component]
+        snrs = data.get('snrs', [np.nan] * len(dat1))
+        pkrs = data.get('pkrs', [np.nan] * len(dat1))
+
+        valid_entries = []
+        for d1, d2, v, snr, pkr in zip(dat1, dat2, velocities, snrs, pkrs):
+            if np.isnan(v) or d2 <= d1:
+                continue
+            if min_snr is not None and (np.isnan(snr) or snr < min_snr):
+                continue
+            if min_pkr is not None and (np.isnan(pkr) or pkr < min_pkr):
+                continue
+            valid_entries.append((d1, d2, v, snr, pkr))
+
+        if not valid_entries:
+            resampled_dict[point] = pd.DataFrame(columns=['date', 'velocity'])
+            continue
+
+        # Build timeline
+        all_dates = [d for triplet in valid_entries for d in triplet[:2]]
+        start_date = min(all_dates)
+        end_date = max(all_dates)
+        time_index = pd.date_range(start=start_date, end=end_date, freq=time_step)
+        date_to_idx = {d: i for i, d in enumerate(time_index)}
+        n_times = len(time_index)
+
+        # Prepare design matrix and rhs
+        n_obs = len(valid_entries)
+        A = lil_matrix((n_obs, n_times))
+        b = np.zeros(n_obs)
+        weights = np.ones(n_obs)
+
+        for i, (d1, d2, v, snr, pkr) in enumerate(valid_entries):
+            duration_days = (d2 - d1).days + 1
+            displacement = v * duration_days / 365.25
+            days = pd.date_range(d1, d2, freq='D')
+            for day in days:
+                if day in date_to_idx:
+                    A[i, date_to_idx[day]] = 1
+            b[i] = displacement
+            if weight_by == 'snr' and snr > 0:
+                weights[i] = snr
+            elif weight_by == 'pkr' and pkr > 0:
+                weights[i] = pkr
+
+        # Apply weights
+        if np.any(weights != 1):
+            W = np.sqrt(weights)
+            A = A.multiply(W[:, np.newaxis])
+            b = b * W
+
+        # Solve least squares
+        x = lsqr(A.tocsr(), b)[0]
+        daily_df = pd.DataFrame({'date': time_index, 'velocity': x})
+
+        # Resample to monthly bins
+        daily_df.set_index('date', inplace=True)
+        if months_per_bin == 12:
+            freq = 'YE'
+        else:
+            freq = f'{months_per_bin}ME'
+        resampled = daily_df.resample(freq).median().reset_index()
+
+        resampled_dict[point] = resampled
+
+    return resampled_dict
+
+def estimate_velocity_time_series(displacement_data, method='weighted', 
+                                  months_per_bin=4, min_snr=3, min_pkr=1.3,
+                                  weight_by=None,            # for 'lsqr'
+                                  time_step='6M',            # for 'lsqr'
+                                  velocity_units='m/year'):  # for 'lsqr'
+    """
+    Estimate velocity time series from displacement data using one of three methods.
+
+    Methods:
+    - 'midpoint': Assigns each velocity to the midpoint of its interval, then resamples.
+    - 'weighted': Distributes velocity uniformly over days in interval, builds daily series, resamples.
+    - 'lsqr'    : Solves a least squares system for piecewise-constant velocity over fixed time steps.
+
     Parameters:
       displacement_data : dict
           Dictionary where each key is a point (e.g., (x, y)) and each value is a dictionary
-          with keys 'dat1', 'dat2', 'u_velocity', 'v_velocity', 'pkrs', and 'snrs'. Each list must have equal length.
+          with keys 'dat1', 'dat2', 'u_velocity', 'v_velocity', 'pkrs', and 'snrs'.
       method : str
-          The method to use for velocity estimation. Choose 'midpoint' for the simple midpoint/resampling approach,
-          or 'weighted' for the approach that constructs a continuous daily time series with quality filtering.
+          One of 'midpoint', 'weighted', or 'lsqr'.
       months_per_bin : int
-          Number of months per aggregated bin (e.g., 1 for monthly, 4 for 4-month intervals, 6 for 6-month, or 12 for annual).
+          Number of months per aggregated bin (e.g., 1 for monthly, 4 for quarterly).
       min_snr : float
-          Minimum acceptable signal-to-noise ratio for filtering measurements (used in the weighted method).
+          Minimum signal-to-noise ratio for filtering (all methods).
       min_pkr : float
-          Minimum acceptable peak ratio for filtering measurements (used in the weighted method).
-    
+          Minimum peak correlation ratio for filtering (all methods).
+      weight_by : str or None
+          For 'lsqr': set to 'snr', 'pkr', or None to apply residual weighting.
+      time_step : str
+          For 'lsqr': frequency of piecewise-constant velocity bins (e.g., 'M', '6M').
+      velocity_units : str
+          Units of input velocity: 'm/year', 'm/day', 'mm/year', etc.
+
     Returns:
       velocity_estimates : dict
-          Dictionary mapping each point to a DataFrame containing the estimated velocities. Each DataFrame
-          will have a time column (e.g., 'month' or 'date') and velocity columns.
+          Dictionary mapping each point to a DataFrame of resampled velocity time series.
     """
     
-    if method.lower() == 'midpoint':
-        # Method 1: Simple approach using midpoint dates and then resampling.
-        midpoint_dfs = create_velocity_time_series(displacement_data, min_snr=None, min_pkr=None)
+    method = method.lower()
+    
+    if method == 'midpoint':
+        midpoint_dfs = create_velocity_time_series(displacement_data, min_snr=min_snr, min_pkr=min_pkr)
         velocity_estimates = resample_velocity_time_series(midpoint_dfs, months_per_bin=months_per_bin)
         print("Using midpoint method (midpoint/resampling).")
     
-    elif method.lower() == 'weighted':
-        # Method 2: Weighted approach that builds a continuous daily time series from image pairs,
-        # applies quality filtering (min_snr, min_pkr), and then aggregates the daily series.
+    elif method == 'weighted':
         monthly_estimates_u = estimate_velocity_via_daily(displacement_data, velocity_component='u_velocity',
                                                           min_snr=min_snr, min_pkr=min_pkr, months_per_bin=months_per_bin)
         monthly_estimates_v = estimate_velocity_via_daily(displacement_data, velocity_component='v_velocity',
@@ -602,8 +706,24 @@ def estimate_velocity_time_series(displacement_data, method='weighted',
         velocity_estimates = merge_monthly_estimates_with_format(monthly_estimates_u, monthly_estimates_v)
         print("Using weighted method with quality filtering and daily aggregation.")
     
+    elif method == 'lsqr':
+        monthly_estimates_u = estimate_velocity_least_squares(
+            displacement_data, velocity_component='u_velocity',
+            min_snr=min_snr, min_pkr=min_pkr,
+            weight_by=weight_by, time_step=time_step,
+            months_per_bin=months_per_bin
+        )
+        monthly_estimates_v = estimate_velocity_least_squares(
+            displacement_data, velocity_component='v_velocity',
+            min_snr=min_snr, min_pkr=min_pkr,
+            weight_by=weight_by, time_step=time_step,
+            months_per_bin=months_per_bin
+        )
+        velocity_estimates = merge_monthly_estimates_with_format(monthly_estimates_u, monthly_estimates_v)
+        print(f"Using LSQR method with time step '{time_step}' and unit conversion from '{velocity_units}'.")
+    
     else:
-        raise ValueError("Invalid method. Choose 'midpoint' or 'weighted'.")
+        raise ValueError("Invalid method. Choose 'midpoint', 'weighted', or 'lsqr'.")
     
     return velocity_estimates
 
