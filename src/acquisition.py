@@ -43,7 +43,9 @@ def load_dem_and_morpho(roi):
 
 def process_sentinel2_data(roi, start_year, end_year, SUMMER_START, SUMMER_END, 
                            cloud_cover_max=10, n_per_year=4, mask_water=False, 
-                           check_clouds=True, cloud_threshold=5, check_snow=False, snow_threshold=5, final_date=None):
+                           check_clouds=True, cloud_threshold=5, check_snow=False, snow_threshold=5,
+                           start_date=None, final_date=None):
+
     """
     Processes Sentinel-2 data with optional water masking and removes duplicates, 
     images with too many clouds, and optionally images with too much snow in the ROI.
@@ -112,6 +114,11 @@ def process_sentinel2_data(roi, start_year, end_year, SUMMER_START, SUMMER_END,
         filtered_collection = filtered_collection.filter(ee.Filter.lte('snow_percentage', snow_threshold))
 
         print(f"Number of images after ROI-based snow filtering: {filtered_collection.size().getInfo()}")
+
+    # Remove images before the specified start_date
+    if start_date:
+        filtered_collection = filtered_collection.filter(ee.Filter.date(start_date, '2100-01-01'))
+        print(f"Number of images after applying start_date filter ({start_date}): {filtered_collection.size().getInfo()}")
 
     # Remove images after the specified final_date
     if final_date:
