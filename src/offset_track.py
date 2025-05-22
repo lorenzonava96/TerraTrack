@@ -19,7 +19,7 @@ def displacement_analysis(
     block_size=16,
     overlap=0.8,
     match_func='fft_ncc',  # For block matching: 'phase_cross_corr', 'fft_ncc', 'median_dense_optical_flow', etc.
-    subpixel_method="os3",  # Only used if match_func is 'fft_ncc'
+    subpixel_method="parabolic",  # Only used if match_func is 'fft_ncc'
     zero_mask=None,  # Optional mask for invalid areas
     filter_params=None,  # Dictionary of parameters for filter_displacements
     plot=True,  # Whether to visualize the displacement field
@@ -170,14 +170,23 @@ def dense_optical_flow_displacement(img1, img2):
 # ------------------------------
 
 def parabolic_interpolation(values, peak_index):
-    """Return subpixel offset relative to the integer peak index."""
+    """
+    Return subpixel offset (float in [-1, +1]) relative to the integer peak index.
+    """
     if peak_index <= 0 or peak_index >= len(values) - 1:
-        return 0.0  # No subpixel offset
+        return 0.0
+
     left = values[peak_index - 1]
     center = values[peak_index]
     right = values[peak_index + 1]
-    offset = 0.5 * (left - right) / (left - 2 * center + right)
+
+    denominator = (left - 2 * center + right)
+    if denominator == 0:
+        return 0.0
+
+    offset = 0.5 * (left - right) / denominator
     return offset
+
 
 def subpixel_os_method(block, method):
     """
@@ -272,7 +281,7 @@ def subpixel_ipg(block):
     except Exception:
         return 0.0, 0.0
     
-def ensemble_subpixel_refinement(block, peak_i, peak_j, methods=["parabolic", "os3", "ipg"]):
+def ensemble_subpixel_refinement(block, peak_i, peak_j, methods=["parabolic", "os3", "gaussian"]):
     """
     Ensemble subpixel refinement using a weighted average of multiple methods.
 
@@ -296,8 +305,8 @@ def ensemble_subpixel_refinement(block, peak_i, peak_j, methods=["parabolic", "o
             dy_, dx_ = subpixel_os_method(block, "os3")
             dx = dx_
             dy = dy_
-        elif method == "ipg":
-            dy_, dx_ = subpixel_ipg(block)
+        elif method == "gaussian":
+            dy_, dx_ = subpixel_gaussian(block)
             dx = dx_
             dy = dy_
         else:
@@ -390,8 +399,14 @@ def batch_fft_ncc(blocks1, blocks2, subpixel_method="parabolic", block_size=bloc
             dx[k] = refined_x + x_min - bs // 2
             dy[k] = refined_y + y_min - bs // 2
         elif subpixel_method == "parabolic":
-            dx[k] = j + parabolic_interpolation(block[i, :], j) - block_size // 2
-            dy[k] = i + parabolic_interpolation(block[:, j], i) - block_size // 2
+            if 0 < j < block.shape[1] - 1:
+                dx_offset = parabolic_interpolation(block[i, :], j)
+            if 0 < i < block.shape[0] - 1:
+                dy_offset = parabolic_interpolation(block[:, j], i)
+
+            dx[k] = j + dx_offset - block_size // 2
+            dy[k] = i + dy_offset - block_size // 2
+
         elif subpixel_method == "os3":
             dy[k], dx[k] = subpixel_os_method(block, method="os3")
         elif subpixel_method == "os5":
