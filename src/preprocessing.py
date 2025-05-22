@@ -163,42 +163,74 @@ def preprocess_image_stack(image_stack, preprocess_params):
         
     return np.stack(preprocessed_stack, axis=2)
 
-def define_date_pairs(metadata_path, min_separation=1, max_separation=5):
+import pandas as pd
+import numpy as np
+from datetime import datetime
+from itertools import combinations
+from typing import Optional, Tuple, List
+
+def define_date_pairs(
+    metadata_path: str,
+    min_separation: float = 1,
+    max_separation: float = 5,
+    reference_date: Optional[str] = None,
+    date_format: str = '%Y-%m-%d'
+) -> Tuple[np.ndarray, np.ndarray, np.ndarray, List[datetime]]:
     """
     Processes date pairs from a metadata CSV and filters them by a specified separation range.
+    Optionally restricts pairs to those that straddle a given reference date (one before, one after).
 
     Parameters:
         metadata_path (str): Path to the metadata CSV file.
         min_separation (float): Minimum separation between dates in years.
         max_separation (float): Maximum separation between dates in years.
+        reference_date (str, optional): If provided, only keep pairs where one date is before
+                                        and the other after this date. Format given by date_format.
+        date_format (str): The datetime.strptime format string for parsing dates.
 
     Returns:
-        tuple: Filtered date pairs (dat1, dat2) and their separations in years.
+        dat1 (np.ndarray): Array of earlier dates in each valid pair.
+        dat2 (np.ndarray): Array of later dates in each valid pair.
+        separation (np.ndarray): Separations (in years) for each valid pair.
+        all_dates (List[datetime]): List of all parsed dates (after filtering Status=='kept').
     """
-    # Load the metadata CSV file
+    # Load and filter
     metadata_df = pd.read_csv(metadata_path)
-
-    # Filter the DataFrame to include only rows where 'Status' is 'kept'
     metadata_df = metadata_df[metadata_df['Status'] == 'kept']
-    # print(metadata_df.head())
-    # Extract the 'Date' column and convert it to datetime objects
-    datax = [datetime.strptime(date, '%Y-%m-%d') for date in metadata_df['Date']]
 
-    # Generate all unique date pairs using itertools.combinations
-    dat1, dat2 = zip(*combinations(datax, 2))
+    # Parse dates
+    all_dates = [datetime.strptime(d, date_format) for d in metadata_df['Date']]
 
-    # Convert lists to numpy arrays for easier handling
-    dat1 = np.array(dat1)
-    dat2 = np.array(dat2)
+    # If a reference date is given, parse it once
+    ref_dt = None
+    if reference_date is not None:
+        ref_dt = datetime.strptime(reference_date, date_format)
 
-    # Calculate separations in years (time difference between the dates)
-    separation = np.array([(d2 - d1).days / 365.25 for d1, d2 in zip(dat1, dat2)])
+    # Prepare lists for valid pairs
+    valid_dat1, valid_dat2, valid_sep = [], [], []
 
-    # Filter separations within the specified range
-    valid_indices = (separation > min_separation) & (separation < max_separation)
-    dat1 = dat1[valid_indices]
-    dat2 = dat2[valid_indices]
-    separation = separation[valid_indices]
+    # Examine all unique combinations
+    for d1, d2 in combinations(sorted(all_dates), 2):
+        # Calculate separation in years
+        sep = (d2 - d1).days / 365.25
 
-    print(f"Number of valid separations: {len(separation)}")
-    return dat1, dat2, separation, datax
+        # Check separation window
+        if not (min_separation < sep < max_separation):
+            continue
+
+        # If reference_date specified, enforce one-before/one-after
+        if ref_dt is not None:
+            if not (d1 < ref_dt < d2):
+                continue
+
+        # Passed all filters
+        valid_dat1.append(d1)
+        valid_dat2.append(d2)
+        valid_sep.append(sep)
+
+    dat1_arr = np.array(valid_dat1)
+    dat2_arr = np.array(valid_dat2)
+    sep_arr  = np.array(valid_sep)
+
+    print(f"Number of valid separations: {len(sep_arr)}")
+    return dat1_arr, dat2_arr, sep_arr, all_dates
