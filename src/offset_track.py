@@ -336,7 +336,7 @@ def ensemble_subpixel_refinement(block, peak_i, peak_j, methods=["parabolic", "o
 # ------------------------------
 # Batch FFT-NCC Matching Function
 # ------------------------------
-def batch_fft_ncc(blocks1, blocks2, subpixel_method="parabolic", block_size=block_size):
+def batch_fft_ncc(blocks1, blocks2, subpixel_method="parabolic", block_size=16):
     """
     Process a batch of blocks using FFT-based normalized cross-correlation.
     
