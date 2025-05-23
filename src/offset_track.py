@@ -396,10 +396,8 @@ def batch_fft_ncc(blocks1, blocks2, subpixel_method="parabolic", block_size=16):
             dx[k] = refined_x + max(j-1,0) - bs // 2
             dy[k] = refined_y + max(i-1,0) - bs // 2
         elif subpixel_method == "parabolic":
-            dx_offset = parabolic_interpolation(block[i, :], j) if 0 < j < bs - 1 else 0.0
-            dy_offset = parabolic_interpolation(block[:, j], i) if 0 < i < bs - 1 else 0.0
-            dx[k] = j + dx_offset - block_size // 2
-            dy[k] = i + dy_offset - block_size // 2
+            dx[k] = j + (parabolic_interpolation(block[i, :], j) if 0 < j < bs - 1 else 0.0) - block_size // 2
+            dy[k] = i + (parabolic_interpolation(block[:, j], i) if 0 < i < bs - 1 else 0.0) - block_size // 2
         elif subpixel_method == "gaussian":
             dx[k] = gaussian_interpolation_1d(block[i, :], j)
             dy[k] = gaussian_interpolation_1d(block[:, j], i)
@@ -485,13 +483,8 @@ def batch_fft_pcc(blocks1, blocks2, subpixel_method="parabolic", block_size=16):
             dx[k] = refined_x + x_min - bs // 2
             dy[k] = refined_y + y_min - bs // 2
         elif subpixel_method == "parabolic":
-            if 0 < j < block.shape[1] - 1:
-                dx_offset = parabolic_interpolation(block[i, :], j)
-            if 0 < i < block.shape[0] - 1:
-                dy_offset = parabolic_interpolation(block[:, j], i)
-
-            dx[k] = j + dx_offset - block_size // 2
-            dy[k] = i + dy_offset - block_size // 2
+            dx[k] = j + (parabolic_interpolation(block[i, :], j) if 0 < j < bs - 1 else 0.0) - block_size // 2
+            dy[k] = i + (parabolic_interpolation(block[:, j], i) if 0 < i < bs - 1 else 0.0) - block_size // 2
 
         elif subpixel_method == "os3":
             dy[k], dx[k] = subpixel_os_method(block, method="os3")
