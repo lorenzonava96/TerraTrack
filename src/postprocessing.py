@@ -434,7 +434,8 @@ def calculate_median_displacement(
     displacement_data,
     pixel_size,
     slope_map=None,
-    apply_slope_correction=False
+    apply_slope_correction=False,
+    normalize_by_time=True
 ):
     """
     Calculate median displacement vectors, their magnitude, and angle.
@@ -444,19 +445,17 @@ def calculate_median_displacement(
         Dictionary with keys (x, y) and values containing 'u_values', 'v_values', 'years_diff'.
     - pixel_size: float
         Nominal ground resolution (e.g., meters per pixel).
-    - min_displacement_threshold: float
-        Minimum magnitude threshold to keep a displacement.
-    - max_displacement_threshold: float
-        Maximum magnitude threshold to keep a displacement.
     - slope_map: 2D ndarray, optional
-        Map of slope angles in radians, same shape as input imagery.
+        Map of slope angles in degrees, same shape as input imagery.
     - apply_slope_correction: bool
         If True, displacements are corrected for slope using 1 / cos(slope_angle).
+    - normalize_by_time: bool
+        If True, displacements are normalized by time baseline to yield velocities (default: True).
 
     Returns:
     - median_feature_points: (N, 2) array of feature point coordinates.
-    - median_u: (N,) array of median horizontal displacements (U).
-    - median_v: (N,) array of median vertical displacements (V).
+    - median_u: (N,) array of horizontal values (U) [m or m/year].
+    - median_v: (N,) array of vertical values (V) [m or m/year].
     - median_magnitude: (N,) array of displacement magnitudes.
     - median_angles: (N,) array of displacement angles (radians).
     """
@@ -469,29 +468,29 @@ def calculate_median_displacement(
 
     for (x, y), data in displacement_data.items():
         if len(data['u_values']) > 0 and len(data['years_diff']) > 0:
-            # Normalize each displacement by time baseline
-            normalized_u = np.array(data['u_values']) / np.array(data['years_diff'])
-            normalized_v = np.array(data['v_values']) / np.array(data['years_diff'])
+            u = np.array(data['u_values'])
+            v = np.array(data['v_values'])
+            t = np.array(data['years_diff'])
 
-            # Compute median velocities (in px/year)
-            median_u_velocity = np.nanmedian(normalized_u)
-            median_v_velocity = np.nanmedian(normalized_v)
+            if normalize_by_time:
+                u = u / t
+                v = v / t
 
-            # Convert to ground displacement (m/year)
-            u_disp = median_u_velocity * pixel_size
-            v_disp = median_v_velocity * pixel_size
+            median_u_val = np.nanmedian(u)
+            median_v_val = np.nanmedian(v)
+
+            u_disp = median_u_val * pixel_size
+            v_disp = median_v_val * pixel_size
 
             if apply_slope_correction and slope_map is not None:
                 try:
-                    slope_angle = np.deg2rad(slope_map[int(y), int(x)])  # CONVERT TO RADIANS
+                    slope_angle = np.deg2rad(slope_map[int(y), int(x)])  # assuming degrees
                     correction_factor = 1 / max(np.cos(slope_angle), 1e-3)
                     u_disp *= correction_factor
                     v_disp *= correction_factor
                 except IndexError:
                     continue
 
-
-            # Compute magnitude and direction
             magnitude = np.sqrt(u_disp**2 + v_disp**2)
             angle = np.arctan2(v_disp, u_disp)
 
