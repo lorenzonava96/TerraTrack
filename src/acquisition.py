@@ -297,15 +297,3 @@ def get_evenly_spaced_images_per_year(collection, start_year, end_year, n_per_ye
         final_collection = final_collection.merge(year_images)
 
     return final_collection
-
-# Function to compute NDWI and mask water regions
-def add_ndwi_and_mask_water(image):
-    # Compute NDWI: (Green - NIR) / (Green + NIR)
-    ndwi = image.normalizedDifference(['B3', 'B8']).rename('NDWI')
-
-    # Create a mask where NDWI > 0 (water)
-    water_mask = ndwi.gt(0)
-
-    # Mask water regions and add NDWI as a band
-    masked_image = image.updateMask(water_mask.Not())
-    return masked_image.addBands(ndwi)
