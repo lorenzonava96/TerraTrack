@@ -880,8 +880,7 @@ def create_gif_with_background_and_colorbar(
 ):
     """
     Create a GIF from a multi-band GeoTIFF where each band is overlaid on the 
-    study_area_image as background. Only magnitude values ≥ 0.2 are shown; values
-    below 0.2 are fully transparent. A colorbar (ranging from 0 to the overall maximum 
+    study_area_image as background. A colorbar (ranging from 0 to the overall maximum 
     magnitude) is added on the side. If velocity_estimates is provided, it will use 
     the date strings from the time series instead of band numbers for titles.
     
