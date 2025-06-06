@@ -21,9 +21,22 @@ Click the badge below to launch:
 ### 🖥️ Run Locally
 
 ```bash
+# Clone the repository
 git clone https://github.com/lorenzonava96/TerraTrack.git
 cd TerraTrack
-...... in progresssssss .........
+
+# Create a new conda environment
+conda create --name terratrack_env python=3.10
+conda activate terratrack_env
+
+# Install required dependencies
+pip install -r requirements_local.txt
+
+# Move the notebook to the root directory so it can access the src/ folder
+mv notebooks/TerraTrack_v1_local.ipynb
+
+# Launch the notebook using Jupyter Notebook or another compatible environment
+
 ```
 
 ---
