@@ -35,9 +35,8 @@ pip install -r requirements_local.txt
 # Move the notebook to the root directory so it can access the src/ folder
 mv notebooks/TerraTrack_v1_local.ipynb
 
-# Launch the notebook using Jupyter Notebook or another compatible environment
-
 ```
+Launch the notebook using Jupyter Notebook or another compatible environment
 
 ---
 
