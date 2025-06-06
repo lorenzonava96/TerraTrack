@@ -339,7 +339,7 @@ def batch_fft_ncc(blocks1, blocks2, subpixel_method="parabolic", block_size=16):
     Parameters:
       blocks1 : ndarray of shape (N, block_size, block_size)
       blocks2 : ndarray of shape (N, block_size, block_size)
-      subpixel_method : str, one of "center_of_mass", "parabolic", etc.
+      subpixel_method : str, one of "parabolic", "center_of_mass", "os3", "os5", "os7", "gaussian", "ipg"
 
     Returns:
       dx, dy : ndarrays (N,) of subpixel displacements
@@ -422,12 +422,12 @@ def batch_fft_ncc(blocks1, blocks2, subpixel_method="parabolic", block_size=16):
 
 def batch_fft_pcc(blocks1, blocks2, subpixel_method="parabolic", block_size=16):
     """
-    Process a batch of blocks using FFT-based normalized cross-correlation.
+    Process a batch of blocks using FFT-based phase cross-correlation.
     
     Parameters:
       blocks1 : ndarray of shape (N, block_size, block_size)
       blocks2 : ndarray of shape (N, block_size, block_size)
-      subpixel_method : str, one of "center_of_mass", "quadratic", "parabolic"
+      subpixel_method : str, one of "parabolic", "center_of_mass", "os3", "os5", "os7", "gaussian", "ipg"
       
     Returns:
       dx, dy : ndarrays (N,) of subpixel displacements (the refined offsets)
