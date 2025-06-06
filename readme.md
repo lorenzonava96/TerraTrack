@@ -61,7 +61,7 @@ Launch the notebook using Jupyter Notebook or another compatible environment
 ```bash
 
 TerraTrack/
-├── notebooks/           # Main notebook(s)
+├── notebooks/           # Main notebooks
 ├── src/                 # Helpers
 ├── figures/             # Logo, visuals
 ├── requirements.txt     # Dependencies for Colab
