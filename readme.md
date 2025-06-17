@@ -30,7 +30,6 @@ conda create --name terratrack_env python=3.10
 conda activate terratrack_env
 
 # Install required dependencies
-pip install -r requirements_local.txt
 
 # Move the notebook to the root directory so it can access the src/ folder
 mv notebooks/TerraTrack_v1_local.ipynb
