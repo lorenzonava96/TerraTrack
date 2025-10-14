@@ -1,5 +1,4 @@
 rasterio
-geemap
+geemap==0.32.0
 geedim
-earthengine-api
-geemap
+earthengine-api==0.1.403
