@@ -4,7 +4,7 @@ import cv2
 import matplotlib.pyplot as plt
 from scipy.ndimage import zoom, median_filter, convolve, median_filter, gaussian_filter, center_of_mass
 from scipy.fft import fft2, ifft2, fftshift
-from scipy.ndimage import gaussian_filter
+from scipy.ndimage import gaussian_filter, generic_filter
 from numpy.lib.stride_tricks import sliding_window_view
 from concurrent.futures import ThreadPoolExecutor, as_completed
 import time
@@ -732,7 +732,15 @@ def filter_displacements(
     # Step 4: Apply angular coherence filter
     if apply_angular_coherence_filter and np.any(valid_mask):
         angles = np.arctan2(v, u)
-        angular_mask = filter_angular_coherence(angles, angular_threshold, smoothing_sigma)
+        exp_angles = np.exp(1j * angles) * valid_mask  # mask invalids
+
+        norm = gaussian_filter(valid_mask.astype(float), sigma=smoothing_sigma)
+        real_s = gaussian_filter(exp_angles.real, sigma=smoothing_sigma) / np.maximum(norm, 1e-6)
+        imag_s = gaussian_filter(exp_angles.imag, sigma=smoothing_sigma) / np.maximum(norm, 1e-6)
+
+        smoothed_angles = np.angle(real_s + 1j*imag_s)
+        ang_dev = np.abs((angles - smoothed_angles + np.pi) % (2*np.pi) - np.pi)
+        angular_mask = ang_dev <= np.deg2rad(angular_threshold)
         valid_mask &= angular_mask
 
     # Step 5: Remove overall median displacement
@@ -744,29 +752,31 @@ def filter_displacements(
 
     # Step 6: Remove erratic displacements
     if apply_erratic_displacement_filter and np.any(valid_mask):
-        u_neighborhood = median_filter(u, size=neighborhood_size)
-        v_neighborhood = median_filter(v, size=neighborhood_size)
+        u_m = np.where(valid_mask, u, np.nan)
+        v_m = np.where(valid_mask, v, np.nan)
 
-        neighborhood_magnitudes = np.sqrt(u_neighborhood**2 + v_neighborhood**2)
-        current_magnitudes = np.sqrt(u**2 + v**2)
+        u_med = generic_filter(u_m, np.nanmedian, size=neighborhood_size, mode='nearest')
+        v_med = generic_filter(v_m, np.nanmedian, size=neighborhood_size, mode='nearest')
 
-        erratic_mask = np.abs(current_magnitudes - neighborhood_magnitudes) < deviation_threshold
+        mag = np.hypot(u, v)
+        mag_med = np.hypot(u_med, v_med)
+        erratic_mask = np.abs(mag - mag_med) < deviation_threshold
         valid_mask &= erratic_mask
 
     # Step 7: Apply median filter to valid displacements
     # We only filter the valid entries. Then we replace the original ones with filtered values.
     if apply_median_filter_step and np.any(valid_mask):
-        # Grab arrays of valid u, v only
-        u_valid = u[valid_mask]
-        v_valid = v[valid_mask]
+        def nanmedian_filter(arr, size):
+            return generic_filter(arr, np.nanmedian, size=size, mode='nearest')
 
-        # Apply median filter (1D) on these valid values
-        u_valid_filtered = median_filter(u_valid, size=filter_size)
-        v_valid_filtered = median_filter(v_valid, size=filter_size)
+        u_m = np.where(valid_mask, u, np.nan)
+        v_m = np.where(valid_mask, v, np.nan)
 
-        # Put them back
-        u[valid_mask] = u_valid_filtered
-        v[valid_mask] = v_valid_filtered
+        if apply_median_filter_step and np.any(valid_mask):
+            u_f = nanmedian_filter(u_m, size=filter_size)
+            v_f = nanmedian_filter(v_m, size=filter_size)
+            u[valid_mask] = u_f[valid_mask]
+            v[valid_mask] = v_f[valid_mask]
 
     # Step 8: Apply PKR filter (only if we have at least one valid PKR)
     if apply_pkr_filter and pkr_values is not None:
