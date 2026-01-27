@@ -2,7 +2,7 @@
   <img src="figures/logo.png" alt="TerraTrack" width="160"/>
 </p>
 
-🛰️ **TerraTrack** is an open-source, cloud-based workflow for detecting and monitoring slow-moving landslides using Sentinel-2 imagery and optical feature tracking. For further details, please consult the paper "A Workflow to Identify and Monitor Slow-Moving Landslides through Spaceborne Optical Feature Tracking" by [Nava et al (2025)]([https://doi.org/10.5194/gmd-19-167-2026](https://doi.org/10.5194/egusphere-2025-2795)).
+🛰️ **TerraTrack** is an open-source, cloud-based workflow for detecting and monitoring slow-moving landslides using Sentinel-2 imagery and optical feature tracking. For further details, please consult the paper "A Workflow to Identify and Monitor Slow-Moving Landslides through Spaceborne Optical Feature Tracking" by [Nava et al (2025)]([https://doi.org/10.5194/egusphere-2025-2795](https://doi.org/10.5194/egusphere-2025-2795)).
 
 
 ---
