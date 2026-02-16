@@ -11,9 +11,13 @@
 
 ### ▶️ Run in Google Colab (Recommended)
 
-Click the badge below to launch:
+Click the badge below to launch V1:
 
 [![Open In Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/github/lorenzonava96/TerraTrack/blob/main/notebooks/TerraTrack_v1.ipynb)
+
+... and V2:
+
+[![Open In Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/github/lorenzonava96/TerraTrack/blob/main/notebooks/TerraTrack_v2.ipynb)
 
 ---
 
