@@ -13,6 +13,115 @@ from rasterio.transform import Affine
 import io
 import imageio.v2 as imageio
 
+def filter_all_pairs(
+    all_u,
+    all_v,
+    all_feature_points,
+    all_pkrs,
+    all_snrs,
+    filter_displacements,
+    block_size,
+    zero_mask=None,
+    filter_params=None,
+    strict_quality_alignment=True,
+    quiet=False,
+):
+    """
+    Applies per-pair displacement filtering across all image pairs.
+
+    Inputs are lists of per-pair arrays/lists:
+      - all_u, all_v: per-pair displacement components (len = n_pairs)
+      - all_feature_points: per-pair point coordinates
+      - all_pkrs, all_snrs: per-pair quality metrics
+      - zero_mask: (H, W) mask (1 = masked) or None
+
+    Returns:
+      filtered_all_u, filtered_all_v, filtered_all_feature_points
+    """
+
+    # Default filter params (matches your notebook cell)
+    default_filter_params = {
+        "apply_magnitude_filter": True,
+        "min_magnitude": 0,
+        "max_magnitude": block_size - 1,
+        "apply_zero_mask_filter": False,
+        "apply_deviation_filter": False,
+        "std_factor": 2.5,
+        "apply_remove_median_displacement": True,
+        "apply_median_filter_step": False,
+        "filter_size": 5,
+        "apply_angular_coherence_filter": False,
+        "angular_threshold": 50,
+        "smoothing_sigma": 1,
+        "apply_erratic_displacement_filter": False,
+        "neighborhood_size": 20,
+        "deviation_threshold": 2.0,
+        "apply_pkr_filter": True,
+        "pkr_threshold": 1.3,
+        "apply_snr_filter": True,
+        "snr_threshold": 3,
+    }
+
+    # Merge user params over defaults
+    if filter_params is None:
+        filter_params = {}
+    params = {**default_filter_params, **filter_params}
+
+    # Ensure zero_mask is array or None
+    zm = np.array(zero_mask) if zero_mask is not None else None
+
+    filtered_all_u = []
+    filtered_all_v = []
+    filtered_all_feature_points = []
+
+    n_pairs = len(all_u)
+    for i, (u, v, points, pkrs, snrs) in enumerate(
+        zip(all_u, all_v, all_feature_points, all_pkrs, all_snrs)
+    ):
+        u = np.asarray(u, dtype=np.float64)
+        v = np.asarray(v, dtype=np.float64)
+        points = np.asarray(points, dtype=np.float64)
+        pkrs = np.asarray(pkrs, dtype=np.float64)
+        snrs = np.asarray(snrs, dtype=np.float64)
+
+        # Align / validate quality arrays
+        if pkrs.shape[0] != u.shape[0] or snrs.shape[0] != u.shape[0]:
+            msg = (
+                f"[pair {i+1}/{n_pairs}] Quality arrays mismatch: "
+                f"len(u)={u.shape[0]}, len(pkr)={pkrs.shape[0]}, len(snr)={snrs.shape[0]}"
+            )
+            if strict_quality_alignment:
+                raise ValueError(msg)
+            else:
+                if not quiet:
+                    print(msg + " → truncating to len(u).")
+                pkrs = pkrs[: u.shape[0]]
+                snrs = snrs[: u.shape[0]]
+
+        # Apply filtering
+        try:
+            u_f, v_f, pts_f = filter_displacements(
+                u, v, points, zm,
+                pkr_values=pkrs,
+                snr_values=snrs,
+                **params
+            )
+        except Exception as e:
+            # Useful diagnostics without dumping giant arrays
+            raise RuntimeError(
+                f"Filtering failed on pair {i+1}/{n_pairs}: {type(e).__name__}: {e}\n"
+                f"Shapes: u={u.shape}, v={v.shape}, points={points.shape}, "
+                f"pkr={pkrs.shape}, snr={snrs.shape}, zero_mask={None if zm is None else zm.shape}\n"
+                f"Params: {params}"
+            ) from e
+
+        filtered_all_u.append(u_f)
+        filtered_all_v.append(v_f)
+        filtered_all_feature_points.append(pts_f)
+
+    return filtered_all_u, filtered_all_v, filtered_all_feature_points, params
+
+
 def resample_morpho_to_match(orig_shape, morpho_path, output_path):
     """
     Resample a three-band morpho image (DEM, slope, aspect) to match the shape of the displacement field (orig).
@@ -602,8 +711,9 @@ def create_raster_maps(feature_points, u_values, v_values, study_area_image, blo
 
             # Compute magnitude and angle
             mag, ang = cv2.cartToPolar(np.array([u_val]), np.array([v_val]), angleInDegrees=True)
-            magnitude_map[grid_y, grid_x] = mag[0]
-            angle_map[grid_y, grid_x] = ang[0]
+            magnitude_map[grid_y, grid_x] = mag.item()
+            angle_map[grid_y, grid_x] = ang.item()
+
 
     # Replace NaNs with interpolated values
     u_map = np.nan_to_num(u_map, nan=0)
