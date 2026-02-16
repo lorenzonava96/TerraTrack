@@ -1,4 +1,7 @@
 import ee # type: ignore
+import os
+import pandas as pd
+import geemap
 
 def get_sentinel2_collection(roi, cloud_cover_max=10):
     """
@@ -40,6 +43,98 @@ def load_dem_and_morpho(roi):
     slope = ee.Terrain.slope(dem)
     aspect = ee.Terrain.aspect(dem)
     return dem.addBands(slope.rename('slope')).addBands(aspect.rename('aspect'))
+
+def export_s2_composite_morpho_and_metadata(
+    final_collection,
+    morpho,
+    roi,
+    output_dir,
+    band="B8",
+    composite_name="S2_Composite.tif",
+    morpho_name="morpho.tif",
+    metadata_name="S2_Metadata.csv",
+    scale=None,
+    crs=None,
+    quiet=False,
+):
+    """
+    Exports:
+      1) Sentinel-2 composite by stacking `band` across `final_collection` (toBands())
+      2) `morpho` ee.Image (e.g., DEM+slope+aspect stacked)
+      3) CSV metadata (Image_ID, Date, Cloud_Cover, Orbit_Number, Tile_ID)
+
+    Notes:
+      - If scale/crs are None, EE/geemap will pick defaults (less deterministic).
+      - roi.getInfo() is evaluated once and reused.
+    """
+    os.makedirs(output_dir, exist_ok=True)
+    region = roi.getInfo()
+
+    # --- Composite (stack band over time to bands) ---
+    composite_image = final_collection.select(band).toBands()
+    composite_path = os.path.join(output_dir, composite_name)
+    geemap.download_ee_image(
+        composite_image,
+        composite_path,
+        scale=scale,
+        crs=crs,
+        region=region,
+    )
+    if not quiet:
+        print(f"Composite image downloaded: {composite_path}")
+
+    # --- Morpho ---
+    morpho_path = os.path.join(output_dir, morpho_name)
+    geemap.download_ee_image(
+        morpho,
+        morpho_path,
+        scale=scale,
+        crs=crs,
+        region=region,
+    )
+    if not quiet:
+        print(f"DEM, Slope, and Aspect downloaded: {morpho_path}")
+
+    # --- Metadata ---
+    # (Each getInfo triggers a request; kept readable. Can be optimized further if needed.)
+    image_ids = final_collection.aggregate_array("system:index").getInfo()
+
+    # Convert timestamps to YYYY-MM-dd in EE, then bring to client
+    dates = (
+        final_collection
+        .aggregate_array("system:time_start")
+        .map(lambda t: ee.Date(t).format("YYYY-MM-dd"))
+        .getInfo()
+    )
+
+    cloud_covers = final_collection.aggregate_array("CLOUDY_PIXEL_PERCENTAGE").getInfo()
+    orbits = final_collection.aggregate_array("SENSING_ORBIT_NUMBER").getInfo()
+    tile_ids = final_collection.aggregate_array("MGRS_TILE").getInfo()
+
+    metadata_df = pd.DataFrame({
+        "Image_ID": image_ids,
+        "Date": dates,
+        "Cloud_Cover": cloud_covers,
+        "Orbit_Number": orbits,
+        "Tile_ID": tile_ids,
+    })
+
+    # Clean ID column (keep trailing timestamp-like token)
+    metadata_df["Image_ID"] = metadata_df["Image_ID"].str.replace(
+        r"^.*?(\d{8}T\d{6}.*)$", r"\1", regex=True
+    )
+
+    metadata_path = os.path.join(output_dir, metadata_name)
+    metadata_df.to_csv(metadata_path, index=False)
+    if not quiet:
+        print(f"Metadata saved to CSV file: {metadata_path}")
+
+    return {
+        "composite_path": composite_path,
+        "morpho_path": morpho_path,
+        "metadata_path": metadata_path,
+        "metadata_df": metadata_df,  # handy for immediate inspection
+    }
 
 def process_sentinel2_data(roi, start_year, end_year, SUMMER_START, SUMMER_END, 
                            cloud_cover_max=10, n_per_year=4, mask_water=False, 
