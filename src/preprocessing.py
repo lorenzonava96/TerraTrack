@@ -9,6 +9,71 @@ import os
 import rasterio
 import matplotlib.pyplot as plt
 
+def load_and_preprocess_stack(
+    composite_path,
+    preprocess_image_stack,
+    method="cross_corr",
+    plot=True,
+    max_images_to_plot=5,
+):
+    """
+    Loads a uint8 composite stack, preprocesses it,
+    builds zero-mask, and optionally plots comparison.
+
+    Returns:
+        orig              → (H, W, bands)
+        preprocessed      → (H, W, bands)
+        zero_mask         → (H, W)
+        orig_masked       → (H, W, bands)
+    """
+
+    preprocess_params = {"method": method}
+
+    # --- Load stack ---
+    with rasterio.open(composite_path) as src:
+        num_bands = src.count
+        orig = src.read()  # (bands, H, W)
+
+    print(f"📦 Number of bands in composite: {num_bands}")
+
+    # --- Preprocess ---
+    preprocessed_stack = preprocess_image_stack(orig, preprocess_params)
+
+    # --- Transpose original for consistency ---
+    orig = np.transpose(orig, (1, 2, 0))  # (H, W, bands)
+
+    print(f"✅ Original stack shape:     {orig.shape}")
+    print(f"✅ Preprocessed stack shape: {preprocessed_stack.shape}")
+
+    # --- Zero mask ---
+    zero_mask = np.any(orig == 0, axis=2).astype(int)
+
+    # Apply mask
+    orig_masked = np.where(
+        zero_mask[..., np.newaxis] == 1,
+        np.nan,
+        orig
+    )
+
+    # --- Optional Plot ---
+    if plot:
+        num_images = min(max_images_to_plot, orig.shape[2])
+        fig, axes = plt.subplots(num_images, 2, figsize=(15, 2 * num_images))
+
+        for i in range(num_images):
+            axes[i, 0].imshow(orig[:, :, i], cmap="gray")
+            axes[i, 0].set_title(f"Original Image {i+1}")
+            axes[i, 0].axis("off")
+
+            axes[i, 1].imshow(preprocessed_stack[:, :, i], cmap="gray")
+            axes[i, 1].set_title(f"Processed Image {i+1}")
+            axes[i, 1].axis("off")
+
+        plt.tight_layout()
+        plt.show()
+
+    return orig, preprocessed_stack, zero_mask, orig_masked
+
 def process_composite_image(output_dir, selection_method='auto'):
     """
     Processes a Sentinel-2 composite image by allowing manual or automatic band selection.
