@@ -272,11 +272,40 @@ def prepare_csv_with_components(updated_dfs, geotiff_path):
         row_mag.update(time_series_mag)
         csv_data_mag.append(row_mag)
     
-    # Convert the lists of dictionaries into DataFrames.
-    formatted_csv_we = pd.DataFrame(csv_data_we)
-    formatted_csv_ns = pd.DataFrame(csv_data_ns)
-    formatted_csv_mag = pd.DataFrame(csv_data_mag)
-    
+    def finalize_timeseries_df(rows):
+        df = pd.DataFrame(rows)
+
+        meta_cols = [
+            "pid",
+            "latitude",
+            "longitude",
+            "x",
+            "y",
+            "median_velocity",
+            "rmse",
+        ]
+
+        date_cols = [
+            c for c in df.columns
+            if isinstance(c, str) and c.startswith("D") and len(c) == 9
+        ]
+
+        date_cols = sorted(
+            date_cols,
+            key=lambda c: pd.to_datetime(c[1:], format="%Y%m%d")
+        )
+
+        for c in meta_cols:
+            if c not in df.columns:
+                df[c] = np.nan
+
+        return df[meta_cols + date_cols]
+
+
+    formatted_csv_we = finalize_timeseries_df(csv_data_we)
+    formatted_csv_ns = finalize_timeseries_df(csv_data_ns)
+    formatted_csv_mag = finalize_timeseries_df(csv_data_mag)
+
     return formatted_csv_we, formatted_csv_ns, formatted_csv_mag
 
 def plot_fastest_points_components(csv_data_ew, csv_data_sn, top_n=5):
