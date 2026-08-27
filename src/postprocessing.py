@@ -12,6 +12,138 @@ import os
 from rasterio.transform import Affine
 import io
 import imageio.v2 as imageio
+from pathlib import Path
+
+import geopandas as gpd
+from shapely.geometry import Point
+
+
+def save_vector_field_qgis(
+    median_feature_points,
+    median_u,
+    median_v,
+    median_magnitude,
+    median_angles,
+    output_path,
+    *,
+    raster_path=None,
+    crs=None,
+    layer_name="vector_field",
+    angles_in_radians=True,
+):
+    """
+    Save a vector field as a QGIS-compatible GeoPackage point layer.
+
+    Parameters
+    ----------
+    median_feature_points : array-like, shape (N, 2)
+        Point positions as (x, y). When raster_path is supplied, these are
+        interpreted as pixel coordinates (column, row).
+    median_u, median_v : array-like, shape (N,)
+        Horizontal and vertical vector components.
+    median_magnitude : array-like, shape (N,)
+        Vector magnitudes.
+    median_angles : array-like, shape (N,)
+        Vector directions.
+    output_path : str or Path
+        Destination GeoPackage path, normally ending in ".gpkg".
+    raster_path : str or Path, optional
+        Georeferenced raster used to transform pixel positions to map
+        coordinates and obtain the CRS.
+    crs : str or CRS, optional
+        CRS used when the points are already in map coordinates.
+        Example: "EPSG:32632".
+    layer_name : str
+        Name of the layer inside the GeoPackage.
+    angles_in_radians : bool
+        Whether median_angles contains radians.
+
+    Returns
+    -------
+    geopandas.GeoDataFrame
+        The exported vector-field data.
+    """
+    points = np.asarray(median_feature_points, dtype=float)
+    u = np.asarray(median_u, dtype=float).reshape(-1)
+    v = np.asarray(median_v, dtype=float).reshape(-1)
+    magnitude = np.asarray(median_magnitude, dtype=float).reshape(-1)
+    angles = np.asarray(median_angles, dtype=float).reshape(-1)
+
+    if points.ndim != 2 or points.shape[1] != 2:
+        raise ValueError(
+            "median_feature_points must have shape (N, 2), containing (x, y)."
+        )
+
+    n = len(points)
+    lengths = {
+        "feature_points": n,
+        "u": len(u),
+        "v": len(v),
+        "magnitude": len(magnitude),
+        "angles": len(angles),
+    }
+    if len(set(lengths.values())) != 1:
+        raise ValueError(f"All inputs must have the same length: {lengths}")
+
+    valid = (
+        np.isfinite(points).all(axis=1)
+        & np.isfinite(u)
+        & np.isfinite(v)
+        & np.isfinite(magnitude)
+        & np.isfinite(angles)
+    )
+
+    points = points[valid]
+    u = u[valid]
+    v = v[valid]
+    magnitude = magnitude[valid]
+    angles = angles[valid]
+
+    if raster_path is not None:
+        with rasterio.open(raster_path) as raster:
+            if raster.crs is None:
+                raise ValueError("The supplied raster has no CRS.")
+
+            # Points are interpreted as pixel (column, row) coordinates.
+            map_coordinates = [
+                raster.transform * (x, y) for x, y in points
+            ]
+            output_crs = raster.crs
+    else:
+        if crs is None:
+            raise ValueError(
+                "Supply raster_path for pixel coordinates, or crs when "
+                "the points are already in map coordinates."
+            )
+
+        map_coordinates = points
+        output_crs = crs
+
+    angle_rad = angles if angles_in_radians else np.deg2rad(angles)
+    angle_deg = np.mod(np.rad2deg(angle_rad), 360.0)
+
+    gdf = gpd.GeoDataFrame(
+        {
+            "u": u,
+            "v": v,
+            "magnitude": magnitude,
+            "angle_rad": angle_rad,
+            "angle_deg": angle_deg,
+        },
+        geometry=[
+            Point(float(x), float(y)) for x, y in map_coordinates
+        ],
+        crs=output_crs,
+    )
+
+    output_path = Path(output_path)
+    if output_path.suffix.lower() != ".gpkg":
+        output_path = output_path.with_suffix(".gpkg")
+
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+    gdf.to_file(output_path, layer=layer_name, driver="GPKG")
+
+    return gdf
 
 def filter_all_pairs(
     all_u,
