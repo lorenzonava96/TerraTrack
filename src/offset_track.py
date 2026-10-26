@@ -188,35 +188,53 @@ def parabolic_interpolation(values, peak_index):
     return offset
 
 
-def subpixel_os_method(block, method):
+def subpixel_os_method(block, peak_i, peak_j, method="os3"):
     """
-    Offset smoothing (OS) subpixel methods: os3, os5, os7.
-    Args:
-        block: 2D numpy array, correlation surface.
-        method: 'os3', 'os5', or 'os7'.
-    Returns:
-        dy, dx: subpixel displacements
-    """
-    size = int(method[2])  # Extract 3, 5, or 7
-    half = size // 2
-    if block.shape[0] < size or block.shape[1] < size:
-        return 0.0, 0.0  # fallback if too close to edge
+    Offset smoothing (OS3, OS5, OS7) around the detected
+    correlation peak.
 
-    center = block.shape[0] // 2
-    region = block[center - half:center + half + 1, center - half:center + half + 1].copy()
+    Returns:
+        dy, dx: fractional subpixel offsets relative to peak.
+    """
+    size = int(method[2])
+    half = size // 2
+
+    h, w = block.shape
+
+    # Check whether the window fits around the actual peak
+    if (peak_i - half < 0 or peak_i + half >= h or
+        peak_j - half < 0 or peak_j + half >= w):
+        return 0.0, 0.0
+
+    # Extract region around detected peak
+    region = block[
+        peak_i-half:peak_i+half+1,
+        peak_j-half:peak_j+half+1
+    ].copy()
+
     weights = region.copy()
-    non_center = np.delete(weights.flatten(), size * size // 2)
+
+    # Background estimated excluding central pixel
+    non_center = np.delete(
+        weights.ravel(), size * size // 2
+    )
     nonmax_mean = np.mean(non_center)
-    # peak_val = region[half, half]
-    # pkr = peak_val / (nonmax_mean + 1e-10)
 
     weights -= nonmax_mean
-    weights[weights < 0] = 0
-    weights /= weights.sum() + 1e-10
+    weights = np.maximum(weights, 0)
 
-    u_grid, v_grid = np.meshgrid(np.arange(-half, half + 1), np.arange(-half, half + 1))
+    total = weights.sum()
+    if total <= 1e-10:
+        return 0.0, 0.0
+
+    weights /= total
+
+    coords = np.arange(-half, half + 1)
+    u_grid, v_grid = np.meshgrid(coords, coords)
+
     dx = np.sum(weights * u_grid)
     dy = np.sum(weights * v_grid)
+
     return dy, dx
 
 def gaussian_interpolation_1d(values, peak_index):
@@ -401,12 +419,14 @@ def batch_fft_ncc(blocks1, blocks2, subpixel_method="parabolic", block_size=16):
         elif subpixel_method == "gaussian":
             dx[k] = gaussian_interpolation_1d(block[i, :], j)
             dy[k] = gaussian_interpolation_1d(block[:, j], i)
-        elif subpixel_method == "os3":
-            dy[k], dx[k] = subpixel_os_method(block, method="os3")
-        elif subpixel_method == "os5":
-            dy[k], dx[k] = subpixel_os_method(block, method="os5")
-        elif subpixel_method == "os7":
-            dy[k], dx[k] = subpixel_os_method(block, method="os7")
+        elif subpixel_method in ("os3", "os5", "os7"):
+
+            offset_y, offset_x = subpixel_os_method(
+                block, i, j, method=subpixel_method
+            )
+
+            dx[k] = j - bs // 2 + np.clip(offset_x, -0.5, 0.5)
+            dy[k] = i - bs // 2 + np.clip(offset_y, -0.5, 0.5)
         elif subpixel_method == "ipg":
             dy[k], dx[k] = subpixel_ipg(block)
         elif subpixel_method == "ensemble":
@@ -486,12 +506,14 @@ def batch_fft_pcc(blocks1, blocks2, subpixel_method="parabolic", block_size=16):
             dx[k] = j + (parabolic_interpolation(block[i, :], j) if 0 < j < bs - 1 else 0.0) - block_size // 2
             dy[k] = i + (parabolic_interpolation(block[:, j], i) if 0 < i < bs - 1 else 0.0) - block_size // 2
 
-        elif subpixel_method == "os3":
-            dy[k], dx[k] = subpixel_os_method(block, method="os3")
-        elif subpixel_method == "os5":
-            dy[k], dx[k] = subpixel_os_method(block, method="os5")
-        elif subpixel_method == "os7":
-            dy[k], dx[k] = subpixel_os_method(block, method="os7")
+        elif subpixel_method in ("os3", "os5", "os7"):
+
+            offset_y, offset_x = subpixel_os_method(
+                block, i, j, method=subpixel_method
+            )
+
+            dx[k] = j - bs // 2 + np.clip(offset_x, -0.5, 0.5)
+            dy[k] = i - bs // 2 + np.clip(offset_y, -0.5, 0.5)
         elif subpixel_method == "gaussian":
             dx[k] = gaussian_interpolation_1d(block[i, :], j)
             dy[k] = gaussian_interpolation_1d(block[:, j], i)
